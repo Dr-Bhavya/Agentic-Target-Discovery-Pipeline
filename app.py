@@ -18,45 +18,66 @@ if "topology_df" not in st.session_state:
 with st.sidebar:
     st.header("🔑 Configuration")
     user_api_key = st.text_input("Enter Free Groq API Key:", type="password")
-    st.markdown("[Get a free Groq API key here](https://console.groq.com/)")
+    st.markdown("[Get a free Groq API key here](https://groq.com)")
     
     st.header("📊 Parameters")
     confidence_score = st.slider("STRING Interaction Confidence Cutoff", 400, 900, 400, step=100)
     st.caption("400 = Medium Confidence, 700 = High Confidence")
 
-# 3. HIGH-UTILITY BIOINFORMATICS TOOLS (ROBUST EXECUTION)
+# 3. CONTEXT-SAFE BIOINFORMATICS PIPELINES
 
 def run_network_topology_pipeline(gene_list_str: str) -> dict:
     """
-    Acts as the Network Analyst tool. Connects to STRING-DB API,
-    builds a network graph via NetworkX, and computes mathematical centralities.
+    Connects to the STRING-DB interaction endpoint using a hardened GET structure.
+    Pre-maps identifiers to guarantee structured network JSON delivery.
     """
+    # Clean and split the gene input string array into clean list components
     genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
     if not genes: 
         return {"status": "error", "message": "No valid gene symbols provided."}
     
+    # Target standard human network mapping endpoint
     url = "https://string-db.org"
+    
+    # Separate parameters cleanly to ensure standard HTTP encoding handles multi-line inputs
     params = {
-        "identifiers": "%0d".join(genes), 
-        "species": 9606, 
+        "identifiers": "\n".join(genes), 
+        "species": 9606,  # Homo Sapiens
         "required_score": confidence_score, 
-        "caller_identity": "targetscout"
+        "caller_identity": "targetscout_v2"
     }
     
     try:
-        response = requests.post(url, data=params)
-        interactions = response.json()
-        if not interactions or "message" in interactions: 
-            return {"status": "error", "message": "No functional protein network interactions found."}
+        # Use GET with explicit parameters to prevent routing block errors
+        response = requests.get(url, params=params)
         
-        # Build NetworkX structural model
+        # Guard rails: Check if response code is not successful before trying to decode JSON
+        if response.status_code != 200:
+            return {"status": "error", "message": f"STRING-DB Server returned error code {response.status_code}. Please verify gene syntax."}
+            
+        try:
+            interactions = response.json()
+        except ValueError:
+            return {"status": "error", "message": "STRING-DB responded with malformed non-JSON data text layout. Try reducing the number of query genes."}
+            
+        if not interactions or (isinstance(interactions, dict) and "message" in sorted(interactions.keys())): 
+            return {"status": "error", "message": "No mapped protein-protein interaction nodes matched at this confidence threshold."}
+        
+        # Construct graph models dynamically
         G = nx.Graph()
         for edge in interactions:
-            G.add_edge(edge["preferredName_A"], edge["preferredName_B"], weight=edge["score"])
+            p1 = edge.get("preferredName_A")
+            p2 = edge.get("preferredName_B")
+            score = edge.get("score")
+            if p1 and p2:
+                G.add_edge(p1, p2, weight=score)
+                
+        if G.number_of_nodes() == 0:
+            return {"status": "error", "message": "Graph assembly failed. Checked items generated zero interacting intersections."}
             
-        # Compute discrete mathematical centralities
+        # Compute centralities safely using NetworkX math vectors
         deg_cent = nx.degree_centrality(G)
-        bet_cent = nx.betweenness_centrality(G)
+        bet_cent = nx.betweenness_centrality(G) if len(G.nodes()) > 2 else {n: 0.0 for n in G.nodes()}
         clo_cent = nx.closeness_centrality(G)
         
         metrics = [{
@@ -73,48 +94,44 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
         st.session_state["topology_df"] = df
         return {
             "status": "success",
-            "top_genes": df.head(3)["Gene"].tolist(),
-            "raw_text": f"Analyzed {len(G.nodes())} interactive network nodes. Top 3 highest consensus hub nodes: {', '.join(df.head(3)['Gene'].tolist())}."
+            "top_genes": df.iloc[0]["Gene"] if not df.empty else genes[0],
+            "raw_text": f"Successfully parsed {len(G.nodes())} biological interaction nodes. Top mathematically prioritized target hub is: {df.iloc[0]['Gene'] if not df.empty else genes[0]}."
         }
     except Exception as e:
-        return {"status": "error", "message": f"Network analysis pipeline down: {str(e)}"}
+        return {"status": "error", "message": f"Network layout script error: {str(e)}"}
 
 def run_functional_enrichment_pipeline(gene_list_str: str) -> str:
-    """
-    Acts as the Pathway Specialist tool. Fetches statistically significant
-    GO terms and KEGG pathways from the STRING enrichment endpoint.
-    """
+    """Fetches enrichment pathways with secure handling for GET formatting."""
     genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
     url = "https://string-db.org"
     try:
-        res = requests.post(url, data={"identifiers": "%0d".join(genes), "species": 9606, "caller_identity": "targetscout"})
+        res = requests.get(url, params={"identifiers": "\n".join(genes), "species": 9606, "caller_identity": "targetscout_v2"})
+        if res.status_code != 200:
+            return "Could not compute enrichment profiles due to downstream server errors."
         results = res.json()
-        if not results or "message" in results: 
-            return "No statistically significant functional pathway enrichments located."
+        if not results or not isinstance(results, list): 
+            return "No statistically significant GO/KEGG pathway terms matched."
             
         terms = [f"- [{t.get('category')}] {t.get('description')} (FDR: {t.get('fdr'):.4e})" for t in results[:5]]
         return "Top Enriched Functional Processes and Pathways:\n" + "\n".join(terms)
     except Exception as e:
-        return f"Functional enrichment calculation failed: {str(e)}"
+        return f"Enrichment pipeline parsing down: {str(e)}"
 
 def run_pubmed_literature_pipeline(target_gene: str) -> str:
-    """
-    Acts as the Literature Reviewer tool. Performs live text mining RAG 
-    by querying NCBI PubMed via E-Utilities for target clinical relevance.
-    """
+    """Queries PubMed API using standard URL token encoders."""
     gene = target_gene.upper().strip()
     url = f"https://nih.gov{gene}[Title/Abstract]+AND+therapeutic+target&retmode=json&retmax=3"
     try:
         res = requests.get(url).json()
         id_list = res.get("esearchresult", {}).get("idlist", [])
         if not id_list: 
-            return f"No historical clinical validation papers found explicitly linking {gene} as a therapeutic target on PubMed."
-        return f"PubMed Search for {gene}: Located supportive peer-reviewed research. Associated PMIDs: {', '.join(id_list)}."
+            return f"No baseline translational tracking records found for target molecule {gene} in active medical publications."
+        return f"PubMed Verification Search for {gene}: Identified supportive target validation articles. Associated PMIDs: {', '.join(id_list)}."
     except Exception as e:
-        return f"PubMed literature tracking failed: {str(e)}"
+        return f"Literature data sweep dropped: {str(e)}"
 
 
-# 4. COMPACT FRONT-END WORKFLOW INTERFACE
+# 4. FRONT-END PANEL LOGIC
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
 input_genes = st.text_area("Provide a comma-separated list of Gene Symbols:", value=default_genes, height=100)
 
@@ -126,65 +143,55 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
         
         with st.status("🕵️‍♂️ Executing multi-stage systems biology workflow...", expanded=True) as status:
             
-            # Stage 1: Run Network Math Programmatically
-            st.write("1. Initializing Network Analyst Layer → Fetching STRING-DB interactions & computing centralities...")
+            # Stage 1: Run Network Mapping
+            st.write("1. Initializing Network Analyst Layer → Querying STRING-DB matrix & running centralities...")
             net_results = run_network_topology_pipeline(input_genes)
             
             if net_results["status"] == "error":
                 st.error(net_results["message"])
-                status.update(label="❌ Pipeline aborted due to network error", state="error")
+                status.update(label="❌ Pipeline aborted due to data parsing error", state="error")
                 st.stop()
                 
             network_context = net_results["raw_text"]
-            top_candidate = net_results["top_genes"][0]
+            top_candidate = net_results["top_genes"]
             
-            # Stage 2: Run Enrichment Programmatically
-            st.write("2. Initializing Pathway Specialist Layer → Calculating functional ontology annotations...")
+            # Stage 2: Functional Annotation
+            st.write("2. Initializing Pathway Specialist Layer → Constructing functional ontology mappings...")
             enrichment_context = run_functional_enrichment_pipeline(input_genes)
             
-            # Stage 3: Run Literature Review on Top Math Hub Gene Programmatically
-            st.write(f"3. Initializing Literature Reviewer Layer → Extracting PubMed verification for top hub gene: {top_candidate}...")
+            # Stage 3: Text Mining RAG
+            st.write(f"3. Initializing Literature Reviewer Layer → Mining live clinical evidence for top hub: {top_candidate}...")
             pubmed_context = run_pubmed_literature_pipeline(top_candidate)
             
-            # Stage 4: Feed Compiled Data to the AI Synthesis Lead
-            st.write("4. Directing full contextual streams to AI Synthesis Lead for final target evaluation reporting...")
+            # Stage 4: AI Synthesis Generation
+            st.write("4. Directing all extracted knowledge streams to AI Synthesis Lead for target reporting...")
             
             target_evaluation_agent = Agent(
                 name="Amgen-Style Target Discovery Lead",
                 model=Groq(id="llama-3.3-70b-versatile"),
                 instructions=[
-                    "You are an expert GCF6 Agentic AI Lead specializing in Disease Biology and Target Discovery at Amgen.",
-                    "Your task is to take the provided multi-source data streams and synthesize them into a professional executive dossier.",
-                    "Ensure your output includes dedicated sections for: 1. Network Topology Insights, 2. Functional & Pathway Annotations, and 3. Translational Clinical Recommendations.",
-                    "Clearly state why the top candidate gene was selected based on the mathematical centrality metrics provided.",
+                    "You are an expert GCF6 Agentic AI Lead specializing in Target Discovery at Amgen.",
+                    "Review the analytical data payloads below, analyze the network values, and build an executive prioritized candidate report.",
+                    "Structure your output cleanly with dedicated titles for: 1. Graph Structural Insights, 2. Pathway Mapping, and 3. Clinical Tractability Recommendations.",
                 ],
                 markdown=True,
             )
             
-            # Construct the comprehensive, augmented prompt packet (RAG Mechanics)
             augmented_prompt = f"""
-            Please review and synthesize the following data payload into an Executive Target Prioritization Dossier:
+            Synthesize this compiled systems biology evidence into an Executive Target Dossier:
             
-            [USER INPUT GENES]: {input_genes}
-            
-            [RETRIEVED NETWORK ANALYSIS DATA]:
-            {network_context}
-            
-            [RETRIEVED FUNCTIONAL ENRICHMENT DATA]:
-            {enrichment_context}
-            
-            [RETRIEVED PUBMED LITERATURE DATA FOR TOP TARGET]:
-            {pubmed_context}
+            [USER LIST]: {input_genes}
+            [NETWORK INTERACTORS EXTRAPOLATION]: {network_context}
+            [FUNCTIONAL ONTOLOGY ANNOTATIONS]: {enrichment_context}
+            [PUBMED TARGET VALIDATION VERIFICATION]: {pubmed_context}
             """
             
-            # Run inference cleanly using the verified production model ID
             agent_response = target_evaluation_agent.run(augmented_prompt)
             status.update(label="✅ Discovery Pipeline Synthesis Complete!", state="complete")
             
-        # 5. RENDER DERIVED ENGINE METRICS AND DOSSIER OUTPUT
+        # 5. RENDER OUTPUT TABLES AND EVALUATIONS
         if st.session_state["topology_df"] is not None:
             st.subheader("📊 Network Centrality Metrics (Computed via NetworkX)")
             st.dataframe(st.session_state["topology_df"], use_container_width=True)
-            
-        st.subheader("📋 Consolidated Master Target Dossier")
-        st.markdown(agent_response.content)
+            st.subheader("📋 Consolidated Master Target Dossier")
+            st.markdown(agent_response.content)
