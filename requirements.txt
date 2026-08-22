@@ -1,0 +1,6 @@
+streamlit
+phidata
+groq
+requests
+networkx
+pandas
