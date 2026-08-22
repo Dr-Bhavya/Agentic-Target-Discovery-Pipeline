@@ -87,7 +87,7 @@ if st.button("🚀 Launch Multi-Agent Target Prioritization Panel"):
         st.error("Please add your free Groq API key in the sidebar configuration layout.")
     else:
         os.environ["GROQ_API_KEY"] = user_api_key
-        free_model = Groq(id="llama-3.1-70b-versatile")
+        free_model = Groq(id="llama-3.3-70b-specdec")
         
         # AGENT 1: The Network Topology Specialist
         network_analyst = Agent(
