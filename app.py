@@ -8,7 +8,7 @@ from phi.model.groq import Groq
 
 # 1. STREAMLIT UI SETUP AND GRAPH MANAGEMENT
 st.set_page_config(page_title="Multi-Agent Systems Biology", layout="wide")
-st.title("👥 TargetScout-AI: Multi-Agent Collaborative Target Discovery Panel")
+st.title("🧬 TargetScout-AI: Multi-Agent Collaborative Target Discovery Panel")
 st.caption("A free, open-source multi-agent platform for systems biology discovery and target validation.")
 
 # Initialize a cross-run session state for dataframe rendering
@@ -132,10 +132,10 @@ if st.button("🚀 Launch Multi-Agent Target Prioritization Panel"):
         # Pass key safely into local environment variables
         os.environ["GROQ_API_KEY"] = user_api_key
         
-        # Define the stable production model ID across agents
+        # FIXED MODEL ID FORMATTING STRING
         production_model = Groq(id="llama-3.3-70b-versatile")
         
-        # AGENT 1: The Network Topology Specialist
+        # AGENT 1: Explicitly pass model engine instance to prevent fallbacks
         network_analyst = Agent(
             name="Network Analyst Agent",
             role="Computes graph topology and maps protein-protein interactions",
@@ -144,7 +144,7 @@ if st.button("🚀 Launch Multi-Agent Target Prioritization Panel"):
             instructions=["Focus strictly on network structure. Calculate centralities and output the top hub genes. Avoid long explanations."],
         )
         
-        # AGENT 2: The Pathway & Functional Annotator
+        # AGENT 2: Explicitly pass model engine instance
         pathway_specialist = Agent(
             name="Pathway Specialist Agent",
             role="Identifies biological mechanisms, GO terms, and KEGG pathways",
@@ -153,7 +153,7 @@ if st.button("🚀 Launch Multi-Agent Target Prioritization Panel"):
             instructions=["Focus strictly on biological pathways, ontology annotations, and false discovery rates. Provide a direct, factual summary."],
         )
         
-        # AGENT 3: The Literature & Text Mining Expert
+        # AGENT 3: Explicitly pass model engine instance
         literature_reviewer = Agent(
             name="Literature Reviewer Agent",
             role="Queries public medical databases for translational proof",
@@ -162,7 +162,7 @@ if st.button("🚀 Launch Multi-Agent Target Prioritization Panel"):
             instructions=["Focus strictly on text mining PubMed records to back up targets with published papers. Return PMIDs clearly."],
         )
         
-        # AGENT 4: The Master Supervisor Orchestrator
+        # AGENT 4: The Master Supervisor Orchestrator Team Link
         orchestrator_agent = Agent(
             name="Discovery Team Orchestrator",
             model=production_model,
@@ -171,7 +171,7 @@ if st.button("🚀 Launch Multi-Agent Target Prioritization Panel"):
                 "You are the Lead Scientific AI Orchestrator at Amgen.",
                 "First, delegate the input gene list to the Network Analyst Agent to calculate the highest math hub genes.",
                 "Second, delegate the input gene list to the Pathway Specialist Agent to pull out active functional mechanisms.",
-                "Third, take the highest-scoring single gene extracted from the Network Analyst's report and pass it to the Literature Reviewer Agent for a PubMed search.",
+                "Third, extract the highest-scoring single gene from the Network Analyst's report and pass it to the Literature Reviewer Agent for a PubMed search.",
                 "Compile all outputs into a single, cohesive, multi-section Executive Target Prioritization Dossier. Clearly attribute which agent provided each insight.",
             ],
             markdown=True,
