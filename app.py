@@ -162,7 +162,7 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             
             gemini_target_agent = Agent(
                 name="Amgen Gemini Target Discovery Lead",
-                model=Gemini(id="gemini-1.5-flash"),  # FIXED: Swapped to fully production-stable endpoint
+                model=Gemini(id="gemini-3.5-flash"),  # FIXED: Swapped to fully production-stable endpoint
                 instructions=[
                     "You are an expert GCF6 Agentic AI Lead specializing in Target Discovery at Amgen.",
                     "Review the systems biology data payload below, analyze the mathematical network centrality values, and build an executive candidate report.",
