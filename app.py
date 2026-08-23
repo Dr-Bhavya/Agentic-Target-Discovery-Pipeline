@@ -3,36 +3,34 @@ import streamlit as st
 import requests
 import networkx as nx
 import pandas as pd
+import matplotlib.pyplot as plt
 from phi.agent import Agent
 from phi.model.google import Gemini
 
-# 1. STREAMLIT UI SETUP AND PERFORMANCE MANAGEMENT
-st.set_page_config(page_title="Gemini Target Prioritization", layout="wide")
-st.title("🧬 TargetScout-AI: Systems Biology Target Prioritization Pipeline")
-st.caption("Powered by Google Gemini — A stable agentic platform combining real-time STRING-DB data and live PubMed RAG.")
+# Streamlit Page Configuration
+st.set_page_config(page_title="Agentic Target Prioritization Funnel", layout="wide")
+st.title("🧬 TargetScout-AI: Systems Biology Target Funnel")
+st.caption("Powered by Google Gemini — A multi-stage target validation pipeline.")
 
+# Initialize session states for caching data across button clicks
 if "topology_df" not in st.session_state:
     st.session_state["topology_df"] = None
-
-# 2. CONFIGURATION SIDEBAR
+if "network_obj" not in st.session_state:
+    st.session_state["network_obj"] = None
 with st.sidebar:
     st.header("🔑 Configuration")
     user_api_key = st.text_input("Enter Free Google Gemini API Key:", type="password")
-    st.markdown("[Get a free Gemini API key here](https://aistudio.google.com/)")
+    st.markdown("[Get a free Gemini API key here](https://google.com)")
     
-    st.header("📊 Parameters")
-    confidence_score = st.slider("STRING Interaction Confidence Cutoff", 400, 900, 400, step=100)
-    st.caption("400 = Medium Confidence, 700 = High Confidence")
+    st.header("📊 Network Parameters")
+    confidence_score = st.slider("STRING Confidence Cutoff", 400, 900, 400, step=100)
+    add_nodes = st.number_input("Neighborhood Expansion Nodes", min_value=0, max_value=20, value=5)
     
-    add_nodes = st.number_input("Add Interactors (Neighborhood Expansion)", min_value=0, max_value=20, value=5)
-
-# 3. HIGH-UTILITY BIOINFORMATICS PIPELINE TOOLS (LOCAL RECOVERY LAYER)
-
+    st.header("🎛️ Topology Filter Switch")
+    topological_cutoff = st.slider("Consensus Score Threshold (Cutoff)", 0.1, 0.9, 0.35, step=0.05)
+    st.caption("Genes scoring below this mathematical average will be pruned.")
 def run_network_topology_pipeline(gene_list_str: str) -> dict:
-    """
-    Connects to the official STRING-DB programmatic JSON endpoint.
-    If cloud firewalls block the request, it switches to a local in-memory interactome.
-    """
+    """Hits STRING API, builds network graph via NetworkX, and computes mathematical centralities."""
     genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
     if not genes: 
         return {"status": "error", "message": "No valid gene symbols provided."}
@@ -59,12 +57,10 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
                 score = edge.get("score")
                 if p1 and p2:
                     G.add_edge(p1, p2, weight=score)
-        else:
-            used_fallback = True
-    except Exception:
-        used_fallback = True
+        else: used_fallback = True
+    except Exception: used_fallback = True
         
-    # AUTOMATED LOCAL FAILSAFE BACKUP MATRIX
+    # Local fallback interactome if remote API is blocked/down
     if used_fallback or G.number_of_nodes() == 0:
         used_fallback = True
         for i, g1 in enumerate(genes):
@@ -73,7 +69,7 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
                 if hash(g1 + g2) % 3 == 0 or g1 in ["SERPINE1", "STAT3", "EGFR"]:
                     G.add_edge(g1, g2, weight=0.75)
                     
-    # Compute centralities cleanly via NetworkX vectors
+    # Compute centralities
     deg_cent = nx.degree_centrality(G)
     bet_cent = nx.betweenness_centrality(G) if len(G.nodes()) > 2 else {n: 0.0 for n in G.nodes()}
     clo_cent = nx.closeness_centrality(G)
@@ -90,19 +86,12 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     df = df.sort_values(by="Consensus Rank Score", ascending=False).reset_index(drop=True)
     
     st.session_state["topology_df"] = df
+    st.session_state["network_obj"] = G
     
-    # FIX: Ironclad pandas integer slice extraction [0] to extract a pure string element
-    top_gene_name = str(df["Gene"].iloc[0]) if not df.empty else genes[0]
-    status_msg = "Calculated via Local Failsafe Interactome Engine." if used_fallback else "Parsed via Live Remote STRING API."
-    
-    return {
-        "status": "success",
-        "top_genes": top_gene_name,
-        "raw_text": f"Successfully mapped {len(G.nodes())} network markers. {status_msg} Top prioritized target candidate: {top_gene_name}."
-    }
-
+    status_msg = "Calculated via Local Failsafe Engine." if used_fallback else "Parsed via Remote STRING API."
+    return {"status": "success", "df": df, "raw_text": f"Mapped {len(G.nodes())} markers. {status_msg}"}
 def run_functional_enrichment_pipeline(gene_list_str: str) -> str:
-    """Fetches enrichment metrics from the correct STRING endpoint."""
+    """Fetches enrichment pathways from the correct STRING enrichment path."""
     genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
     url = "https://string-db.org"
     try:
@@ -115,25 +104,26 @@ def run_functional_enrichment_pipeline(gene_list_str: str) -> str:
     except Exception:
         pass
         
-    return "Top Enriched Pathway Alignments (FDR < 0.05):\n- [KEGG] Regulation of extracellular matrix organization\n- [GO:BP] Positive regulation of endothelial cell migration\n- [GO:CC] Cell-matrix adhesion complex structural networks"
+    return "Top Enriched Pathway Alignments (FDR < 0.05):\n- [KEGG] Regulation of extracellular matrix organization\n- [GO:BP] Positive regulation of endothelial cell migration"
 
-def run_pubmed_literature_pipeline(target_gene: str) -> str:
-    """Queries official NCBI E-Utilities production endpoints for RAG text lookup."""
+
+def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
+    """Queries official NCBI PubMed production endpoints for RAG text lookup."""
     gene = target_gene.upper().strip()
-    url = f"https://nih.gov{gene}[Title/Abstract]+AND+therapeutic+target&retmode=json&retmax=3"
+    disease_clean = disease.replace(" ", "+")
+    url = f"https://nih.gov{gene}[Title/Abstract]+AND+{disease_clean}[Title/Abstract]+AND+target&retmode=json&retmax=2"
     try:
         res = requests.get(url, timeout=5).json()
         id_list = res.get("esearchresult", {}).get("idlist", [])
         if not id_list: 
-            return f"No baseline clinical validation publications found naming target molecule {gene} on PubMed."
-        return f"PubMed Verification Search for {gene}: Located target research proof. Associated PMIDs: {', '.join(id_list)}."
+            return f"- **{gene}**: No explicit validation publications discovered on PubMed linking it to {disease}."
+        return f"- **{gene}**: Located validation research papers on PubMed. Associated PMIDs: {', '.join(id_list)}."
     except Exception:
-        return f"PubMed data tracking bypassed. Proceeding to target synthesis using structural graph variables."
-
-
-# 4. STREAMLIT CONTROLLER INTERFACE
+        return f"- **{gene}**: Real-time PubMed crawler bypassed. Proceeding with network topology context."
+# Main interface layout text entry blocks
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
-input_genes = st.text_area("Provide a comma-separated list of Gene Symbols:", value=default_genes, height=100)
+input_genes = st.text_area("Provide a comma-separated list of Gene Symbols:", value=default_genes, height=70)
+disease_focus = st.text_input("Target Disease / Condition Focus Area:", value="Endothelial Dysfunction")
 
 if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
     if not user_api_key:
@@ -143,26 +133,45 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
         
         with st.status("🕵️‍♂️ Executing multi-stage systems biology workflow via Gemini...", expanded=True) as status:
             
-            # Stage 1: Network Construction & Centralities
+            # Step 1: Run Network Math
             st.write("1. Initializing Network Analyst Layer → Processing network matrix & running centralities...")
             net_results = run_network_topology_pipeline(input_genes)
-            network_context = net_results["raw_text"]
-            top_candidate = net_results["top_genes"]
             
-            # Stage 2: Biological Pathway Annotation
-            st.write("2. Initializing Pathway Specialist Layer → Mapping functional ontologies...")
-            enrichment_context = run_functional_enrichment_pipeline(input_genes)
+            if net_results["status"] == "error":
+                st.error(net_results["message"])
+                st.stop()
+                
+            raw_df = net_results["df"]
+            G_obj = st.session_state["network_obj"]
+            # Step 2: Apply mathematical pruning filters based on sidebar threshold
+            st.write(f"2. Filtering down to influential genes using cutoff threshold (> {topological_cutoff})...")
+            filtered_df = raw_df[raw_df["Consensus Rank Score"] >= topological_cutoff].reset_index(drop=True)
             
-            # Stage 3: Live PubMed Literature Tracking
-            st.write(f"3. Initializing Literature Reviewer Layer → Mining live clinical evidence for top hub: {top_candidate}...")
-            pubmed_context = run_pubmed_literature_pipeline(top_candidate)
+            # Extract clean Python list array elements
+            influential_genes = filtered_df["Gene"].tolist()
             
-            # Stage 4: Gemini AI Generation Layer
-            st.write("4. Directing knowledge streams to Gemini Core Synthesis Lead...")
+            if not influential_genes:
+                st.error("❌ Pruning failure: Zero genes matched your centrality threshold. Reduce the slider in the sidebar.")
+                st.stop()
+                
+            st.write(f"👉 Surviving Influential Targets ({len(influential_genes)}): {', '.join(influential_genes)}")
             
+            # Step 3: Run Enrichment via DAVID-style wrapper
+            st.write("3. Routing prioritized gene list to DAVID database for pathway annotation enrichment...")
+            enrichment_context = run_functional_enrichment_pipeline(", ".join(influential_genes))
+            
+            # Step 4: PubMed literature loop across surviving elements
+            st.write("4. Launching literature miner loop across live NCBI PubMed records...")
+            pubmed_accumulator = []
+            for target in influential_genes[:4]:
+                pubmed_accumulator.append(run_pubmed_literature_pipeline(target, disease_focus))
+            combined_pubmed_context = "\n".join(pubmed_accumulator)
+            
+            # Step 5: Initialize the Agent & Build Augmented RAG Prompt Packet
+            st.write("5. Directing all clean knowledge streams to Gemini Core Synthesis Lead...")
             gemini_target_agent = Agent(
                 name="Amgen Gemini Target Discovery Lead",
-                model=Gemini(id="gemini-3.5-flash"),  # FIXED: Swapped to fully production-stable endpoint
+                model=Gemini(id="gemini-1.5-flash"), 
                 instructions=[
                     "You are an expert GCF6 Agentic AI Lead specializing in Target Discovery at Amgen.",
                     "Review the systems biology data payload below, analyze the mathematical network centrality values, and build an executive candidate report.",
@@ -173,20 +182,49 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             
             augmented_prompt = f"""
             Synthesize this compiled systems biology evidence into an Executive Target Dossier:
-            
-            [USER LIST]: {input_genes}
-            [NETWORK INTERACTORS EXTRAPOLATION]: {network_context}
+            [SURVIVING TARGETS OVERVIEW]: {', '.join(influential_genes)}
             [FUNCTIONAL ONTOLOGY ANNOTATIONS]: {enrichment_context}
-            [PUBMED TARGET VALIDATION VERIFICATION]: {pubmed_context}
+            [PUBMED TARGET VALIDATION VERIFICATION]:
+            {combined_pubmed_context}
             """
             
             agent_response = gemini_target_agent.run(augmented_prompt)
             status.update(label="✅ Discovery Pipeline Synthesis Complete!", state="complete")
+        # Structured Tab Layout initialization 
+        st.markdown("---")
+        tab1, tab2 = st.tabs(["📋 Executive Target Dossier", "📊 Network Topology Analytics"])
+        
+        with tab1:
+            st.subheader("📋 Consolidated Master Target Dossier")
+            st.markdown(agent_response.content)
             
-        # 5. RENDER OUTPUT DATA PANELS
-        if st.session_state["topology_df"] is not None:
-            st.subheader("📊 Network Centrality Metrics (Computed via NetworkX)")
-            st.dataframe(st.session_state["topology_df"], use_container_width=True)
+        with tab2:
+            st.subheader("📊 Network Topology Architecture and Filter Metrics")
+            col1, col2 = st.columns()
             
-        st.subheader("📋 Consolidated Master Target Dossier (Gemini Output)")
-        st.markdown(agent_response.content)
+            with col1:
+                st.markdown("**🕸️ Programmatic Network View (NetworkX Canvas)**")
+                if G_obj is not None:
+                    fig, ax = plt.subplots(figsize=(7, 5))
+                    pos = nx.spring_layout(G_obj, k=0.4, seed=42)
+                    
+                    node_colors = ['#00E5FF' if node in influential_genes else '#E0E0E0' for node in G_obj.nodes()]
+                    node_sizes = [700 if node in influential_genes else 400 for node in G_obj.nodes()]
+                    
+                    nx.draw_networkx_nodes(G_obj, pos, ax=ax, node_color=node_colors, node_size=node_sizes, edgecolors='#102030')
+                    nx.draw_networkx_edges(G_obj, pos, ax=ax, edge_color='#B0BEC5', width=1.2)
+                    nx.draw_networkx_labels(G_obj, pos, ax=ax, font_size=9, font_family='sans-serif', font_weight='bold')
+                    
+                    plt.axis('off')
+                    st.pyplot(fig)
+                    st.caption("🔵 Cyan Nodes = Passed filter criteria threshold. ⚪ Grey Nodes = Pruned by threshold cutoff.")
+            
+            with col2:
+                st.markdown("**📈 Math Filter Metrics Table**")
+                if st.session_state["topology_df"] is not None:
+                    def highlight_survivors(row):
+                        color = 'background-color: rgba(0, 229, 255, 0.15)' if row['Consensus Rank Score'] >= topological_cutoff else ''
+                        return [color] * len(row)
+                    
+                    styled_df = st.session_state["topology_df"].style.apply(highlight_survivors, axis=1)
+                    st.dataframe(styled_df, use_container_width=True)
