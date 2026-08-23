@@ -4,21 +4,21 @@ import requests
 import networkx as nx
 import pandas as pd
 from phi.agent import Agent
-from phi.model.groq import Groq
+from phi.model.google import Gemini  # Swapped to Google model module
 
-# 1. STREAMLIT UI SETUP AND CONFIGURATION
-st.set_page_config(page_title="Agentic Target Prioritization", layout="wide")
+# 1. STREAMLIT UI SETUP AND PERFORMANCE MANAGEMENT
+st.set_page_config(page_title="Gemini Target Prioritization", layout="wide")
 st.title("🧬 TargetScout-AI: Systems Biology Target Prioritization Pipeline")
-st.caption("A stable, high-utility agentic platform combining real-time STRING-DB data, NetworkX topology, and live PubMed RAG.")
+st.caption("Powered by Google Gemini — A stable agentic platform combining real-time STRING-DB data and live PubMed RAG.")
 
 if "topology_df" not in st.session_state:
     st.session_state["topology_df"] = None
 
-# 2. CONFIGURATION SIDEBAR LAYOUT
+# 2. CONFIGURATION SIDEBAR
 with st.sidebar:
     st.header("🔑 Configuration")
-    user_api_key = st.text_input("Enter Free Groq API Key:", type="password")
-    st.markdown("[Get a free Groq API key here](https://groq.com)")
+    user_api_key = st.text_input("Enter Free Google Gemini API Key:", type="password")
+    st.markdown("[Get a free Gemini API key here](https://aistudio.google.com/)")
     
     st.header("📊 Parameters")
     confidence_score = st.slider("STRING Interaction Confidence Cutoff", 400, 900, 400, step=100)
@@ -26,13 +26,10 @@ with st.sidebar:
     
     add_nodes = st.number_input("Add Interactors (Neighborhood Expansion)", min_value=0, max_value=20, value=5)
 
-# 3. ROBUST BIOINFORMATICS COMPUTATIONAL CHUNKS
+# 3. HIGH-UTILITY BIOINFORMATICS PIPELINE TOOLS
 
 def run_network_topology_pipeline(gene_list_str: str) -> dict:
-    """
-    Connects to the STRING-DB interaction network endpoint via standard POST parameters.
-    Extracts topological centralities using NetworkX math.
-    """
+    """Connects to STRING-DB via POST, builds network graph, and returns metrics."""
     genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
     if not genes: 
         return {"status": "error", "message": "No valid gene symbols provided."}
@@ -40,10 +37,10 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     url = "https://string-db.org"
     payload = {
         "identifiers": "\n".join(genes), 
-        "species": 9606,  # Homo Sapiens
+        "species": 9606, 
         "required_score": confidence_score, 
-        "add_white_nodes": int(add_nodes),
-        "caller_identity": "targetscout_final"
+        "add_nodes": int(add_nodes),
+        "caller_identity": "targetscout_gemini"
     }
     
     try:
@@ -59,7 +56,6 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
         if not interactions or (isinstance(interactions, dict) and "message" in interactions): 
             return {"status": "error", "message": "No network interaction partners matched for these genes."}
         
-        # Assemble Graph Matrix
         G = nx.Graph()
         for edge in interactions:
             p1 = edge.get("preferredName_A")
@@ -71,7 +67,6 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
         if G.number_of_nodes() == 0:
             return {"status": "error", "message": "Graph generation failed. Matrix nodes are zero."}
             
-        # Compute exact topological vectors
         deg_cent = nx.degree_centrality(G)
         bet_cent = nx.betweenness_centrality(G) if len(G.nodes()) > 2 else {n: 0.0 for n in G.nodes()}
         clo_cent = nx.closeness_centrality(G)
@@ -89,25 +84,23 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
         
         st.session_state["topology_df"] = df
         
-        # FIX 1: Corrected integer positional lookup syntax using .iloc[0] and column identifier
+        # Pull out the top prioritized gene symbol cleanly using integer location matching
         top_gene_name = str(df.iloc[0]["Gene"]) if not df.empty else genes[0]
         
         return {
             "status": "success",
             "top_genes": top_gene_name,
-            "raw_text": f"Parsed {len(G.nodes())} interactive graph network items. Top prioritized biological candidate hub gene is: {top_gene_name}."
+            "raw_text": f"Parsed {len(G.nodes())} network items. Top prioritized target hub gene candidate is: {top_gene_name}."
         }
     except Exception as e:
         return {"status": "error", "message": f"Network analysis pipeline down: {str(e)}"}
 
 def run_functional_enrichment_pipeline(gene_list_str: str) -> str:
-    """Fetches GO process and KEGG functional categories from STRING database matrix models."""
+    """Fetches GO process and KEGG functional categories from STRING-DB."""
     genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
     url = "https://string-db.org"
     try:
-        res = requests.post(url, data={"identifiers": "\n".join(genes), "species": 9606, "caller_identity": "targetscout_final"})
-        if res.status_code != 200:
-            return "Could not compute functional ontology sets."
+        res = requests.post(url, data={"identifiers": "\n".join(genes), "species": 9606, "caller_identity": "targetscout_gemini"})
         results = res.json()
         if not results or not isinstance(results, list): 
             return "No statistically significant pathway items matched for the input list."
@@ -115,10 +108,10 @@ def run_functional_enrichment_pipeline(gene_list_str: str) -> str:
         terms = [f"- [{t.get('category')}] {t.get('description')} (FDR: {t.get('fdr'):.4e})" for t in results[:5]]
         return "Top Enriched Pathway Alignments:\n" + "\n".join(terms)
     except Exception as e:
-        return f"Enrichment pipeline parsing exception error: {str(e)}"
+        return f"Enrichment pipeline parsing down: {str(e)}"
 
 def run_pubmed_literature_pipeline(target_gene: str) -> str:
-    """Performs real-time abstract scraping via public NCBI E-Utilities token parameters."""
+    """Performs real-time abstract extraction using NCBI PubMed APIs."""
     gene = target_gene.upper().strip()
     url = f"https://nih.gov{gene}[Title/Abstract]+AND+therapeutic+target&retmode=json&retmax=3"
     try:
@@ -131,19 +124,20 @@ def run_pubmed_literature_pipeline(target_gene: str) -> str:
         return f"PubMed literature verification pipeline disconnected: {str(e)}"
 
 
-# 4. STREAMLIT APPLICATION CONTROLLER PANEL
+# 4. STREAMLIT CONTROLLER INTERFACE
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
 input_genes = st.text_area("Provide a comma-separated list of Gene Symbols:", value=default_genes, height=100)
 
 if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
     if not user_api_key:
-        st.error("Please add your free Groq API key in the sidebar configuration layout.")
+        st.error("Please add your free Google Gemini API key in the sidebar configuration layout.")
     else:
-        os.environ["GROQ_API_KEY"] = user_api_key
+        # Commit key safely to environmental routing systems for Phidata backend compliance
+        os.environ["GOOGLE_API_KEY"] = user_api_key
         
-        with st.status("🕵️‍♂️ Executing multi-stage systems biology workflow...", expanded=True) as status:
+        with st.status("🕵️‍♂️ Executing multi-stage systems biology workflow via Gemini...", expanded=True) as status:
             
-            # Stage 1: Network Construction & Metrics
+            # Stage 1: Network Construction & Topology
             st.write("1. Initializing Network Analyst Layer → Querying STRING-DB matrix & running centralities...")
             net_results = run_network_topology_pipeline(input_genes)
             
@@ -155,44 +149,45 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             network_context = net_results["raw_text"]
             top_candidate = net_results["top_genes"]
             
-            # Stage 2: Functional Annotation Tracking
+            # Stage 2: Functional Pathway Annotation
             st.write("2. Initializing Pathway Specialist Layer → Constructing functional ontology mappings...")
             enrichment_context = run_functional_enrichment_pipeline(input_genes)
             
-            # Stage 3: Real-Time PubMed Literature Sweep
+            # Stage 3: PubMed Real-time literature RAG
             st.write(f"3. Initializing Literature Reviewer Layer → Mining live clinical evidence for top hub: {top_candidate}...")
             pubmed_context = run_pubmed_literature_pipeline(top_candidate)
             
-            # Stage 4: Dynamic RAG Integration & Inference
-            st.write("4. Directing all extracted knowledge streams to AI Synthesis Lead for target reporting...")
+            # Stage 4: Gemini Core Data Synthesis Engine
+            st.write("4. Directing all extracted knowledge streams to Gemini Core Synthesis Lead...")
             
-            target_evaluation_agent = Agent(
-                name="Amgen-Style Target Discovery Lead",
-                model=Groq(id="llama3-8b-8192"),
+            # Initialize using Phidata's native Google Gemini Connector
+            gemini_target_agent = Agent(
+                name="Amgen Gemini Target Discovery Lead",
+                model=Gemini(id="gemini-2.5-flash"),  # Clean standard production Gemini engine
                 instructions=[
-                    "You are a Senior Systems Biology & Target Discovery Scientist.",
-                    "Analyze the provided network topology metrics, functional pathway context, and PubMed clinical validation context.",
-                    "Synthesize a therapeutic target brief detailing why this gene acts as a viable druggable hub bottleneck candidate."
+                    "You are an expert GCF6 Agentic AI Lead specializing in Target Discovery at Amgen.",
+                    "Review the systems biology data payload below, analyze the mathematical network centrality values, and build an executive candidate report.",
+                    "Structure your output cleanly with titles for: 1. Graph Structural Insights, 2. Pathway Mapping, and 3. Clinical Tractability Recommendations.",
                 ],
-                markdown=True
+                markdown=True,
             )
             
-            combined_prompt = f"""
-            Synthesize a target report based on these real-time pipelines:
+            augmented_prompt = f"""
+            Synthesize this compiled systems biology evidence into an Executive Target Dossier:
             
-            [NETWORK METRICS]: {network_context}
-            [FUNCTIONAL ONTOLOGY]: {enrichment_context}
-            [LITERATURE EVIDENCE]: {pubmed_context}
+            [USER LIST]: {input_genes}
+            [NETWORK INTERACTORS EXTRAPOLATION]: {network_context}
+            [FUNCTIONAL ONTOLOGY ANNOTATIONS]: {enrichment_context}
+            [PUBMED TARGET VALIDATION VERIFICATION]: {pubmed_context}
             """
             
-            agent_response = target_evaluation_agent.run(combined_prompt)
-            status.update(label="✨ Pipeline completed successfully!", state="complete")
+            agent_response = gemini_target_agent.run(augmented_prompt)
+            status.update(label="✅ Discovery Pipeline Synthesis Complete!", state="complete")
             
-        # Display Results Panels
-        st.subheader("📊 Topological Prioritization Matrix")
-        # FIX 2: Fixed state checking syntax to prevent loading/rendering blank spaces
+        # 5. RENDER SYSTEM MATHEMATICS GRID AND SUMMARY DOSSIERS
         if st.session_state["topology_df"] is not None:
+            st.subheader("📊 Network Centrality Metrics (Computed via NetworkX)")
             st.dataframe(st.session_state["topology_df"], use_container_width=True)
             
-        st.subheader("🔬 AI Target Discovery Evaluation Report")
+        st.subheader("📋 Consolidated Master Target Dossier (Gemini Output)")
         st.markdown(agent_response.content)
