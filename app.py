@@ -201,7 +201,8 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                     "You are an expert Lead Computational Systems Biologist and Lead Scientific AI Orchestrator specializing in Target Discovery and Translational Medicine.",
                     "Review the systems biology data payload below, analyze the mathematical network centrality values, and build an executive candidate report.",
                     "Structure your output cleanly with titles for: 1. Graph Structural Insights, 2. Pathway Mapping, and 3. Clinical Tractability Recommendations.",
-                    "CRITICAL: Include a '📚 Verifiable Scientific References' section at the absolute bottom. Print the exact clickable Markdown hyperlinks passed from the PubMed context payload.",
+                    "CRITICAL FOR INLINE CITATIONS: When writing about target findings, you must place the matching bracketed index number (e.g., [1], [2]) directly after your statement to show which reference verified it.",
+                    "CRITICAL FOR THE REFERENCE LIST: You must include a '📚 Verifiable Scientific References' section at the absolute bottom. Print the exact numbered text lines passed to you in the PubMed payload.",
                 ],
                 markdown=True,
             )
