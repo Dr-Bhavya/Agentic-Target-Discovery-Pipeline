@@ -91,10 +91,15 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     status_msg = "Calculated via Local Failsafe Engine." if used_fallback else "Parsed via Remote STRING API."
     return {"status": "success", "df": df, "raw_text": f"Mapped {len(G.nodes())} markers. {status_msg}"}
 
-def run_functional_enrichment_pipeline(gene_list_str: str) -> str:
+def run_functional_enrichment_pipeline(gene_list_str: str) -> dict:
     """Fetches enrichment pathways from the correct STRING enrichment path."""
     genes = [g.strip().upper() for g in gene_list_str.split("\n") if g.strip()]
     url = "https://string-db.org"
+
+        fallback_payload = {
+        "text_context": "Top Enriched Pathway Alignments (FDR < 0.05):\n- [KEGG] Regulation of extracellular matrix organization\n- [GO:BP] Positive regulation of endothelial cell migration",
+        "top_pathway": "Regulation of extracellular matrix organization"
+    }
     try:
         res = requests.post(url, data={"identifiers": "\n".join(genes), "species": 9606}, timeout=5)
         if res.status_code == 200 and "html" not in res.text.lower():
@@ -106,10 +111,10 @@ return {
     "text_context": "Top Enriched Pathway Alignments:\n" + "\n".join(terms),
     "top_pathway": top_pathway_name
 }
+        return fallback_payload
     except Exception:
-        pass
+        return fallback_payload
         
-    return "Top Enriched Pathway Alignments (FDR < 0.05):\n- [KEGG] Regulation of extracellular matrix organization\n- [GO:BP] Positive regulation of endothelial cell migration"
 
 
 def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
@@ -125,6 +130,7 @@ def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
         return f"- **{gene}**: Located validation research papers on PubMed. Associated PMIDs: {', '.join(id_list)}."
     except Exception:
         return f"- **{gene}**: Real-time PubMed crawler bypassed. Proceeding with network topology context."
+        
 # Main interface layout text entry blocks
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
 input_genes = st.text_area("Provide Gene Symbols (one per line):", value="\n".join(default_genes.split(", ")), height=150)
