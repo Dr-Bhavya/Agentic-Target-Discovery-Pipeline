@@ -96,7 +96,7 @@ def run_functional_enrichment_pipeline(gene_list_str: str) -> dict:
     genes = [g.strip().upper() for g in gene_list_str.split("\n") if g.strip()]
     url = "https://string-db.org"
 
-        fallback_payload = {
+    fallback_payload = {
         "text_context": "Top Enriched Pathway Alignments (FDR < 0.05):\n- [KEGG] Regulation of extracellular matrix organization\n- [GO:BP] Positive regulation of endothelial cell migration",
         "top_pathway": "Regulation of extracellular matrix organization"
     }
