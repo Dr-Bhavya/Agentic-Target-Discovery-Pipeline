@@ -24,7 +24,7 @@ with st.sidebar:
     
     st.header("📊 Network Parameters")
     confidence_score = st.slider("STRING Confidence Cutoff", 400, 900, 400, step=100)
-    add_nodes = st.number_input("Neighborhood Expansion Nodes", min_value=0, max_value=20, value=5)
+    # add_nodes = st.number_input("Neighborhood Expansion Nodes", min_value=0, max_value=20, value=5)
     
     st.header("🎛️ Topology Filter Switch")
     topological_cutoff = st.slider("Consensus Score Threshold (Cutoff)", 0.1, 0.9, 0.35, step=0.05)
@@ -40,7 +40,7 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
         "identifiers": "\n".join(genes), 
         "species": 9606, 
         "required_score": confidence_score, 
-        "add_nodes": int(add_nodes),
+        "add_nodes": 0,
         "caller_identity": "targetscout_gemini"
     }
     
@@ -101,7 +101,11 @@ def run_functional_enrichment_pipeline(gene_list_str: str) -> str:
             results = res.json()
             if results and isinstance(results, list):
                 terms = [f"- [{t.get('category')}] {t.get('description')} (FDR: {t.get('fdr'):.4e})" for t in results[:5]]
-                return "Top Enriched Pathway Alignments:\n" + "\n".join(terms)
+                top_pathway_name = results[0].get('description', 'therapeutic target') if (results and isinstance(results, list)) else 'therapeutic target'
+return {
+    "text_context": "Top Enriched Pathway Alignments:\n" + "\n".join(terms),
+    "top_pathway": top_pathway_name
+}
     except Exception:
         pass
         
@@ -124,7 +128,7 @@ def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
 # Main interface layout text entry blocks
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
 input_genes = st.text_area("Provide Gene Symbols (one per line):", value="\n".join(default_genes.split(", ")), height=150)
-disease_focus = st.text_input("Target Disease / Condition Focus Area:", value="Endothelial Dysfunction")
+# disease_focus = st.text_input("Target Disease / Condition Focus Area:", value="Endothelial Dysfunction")
 
 if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
     if not user_api_key:
@@ -158,15 +162,31 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             st.write(f"👉 Surviving Influential Targets ({len(influential_genes)}): {', '.join(influential_genes)}")
             
             # Step 3: Run Enrichment via DAVID-style wrapper
-            st.write("3. Routing prioritized gene list to DAVID database for pathway annotation enrichment...")
-            enrichment_context = run_functional_enrichment_pipeline(", ".join(influential_genes))
-            
-            # Step 4: PubMed literature loop across surviving elements
-            st.write("4. Launching literature miner loop across live NCBI PubMed records...")
-            pubmed_accumulator = []
-            for target in influential_genes[:4]:
-                pubmed_accumulator.append(run_pubmed_literature_pipeline(target, disease_focus))
-            combined_pubmed_context = "\n".join(pubmed_accumulator)
+            # INSIDE Block 6, REPLACE Stage 3 and Stage 4 execution lines with this:
+
+# Stage 2: Functional Annotation Tracking (DAVID Wrapper)
+st.write("2. Routing prioritized gene list to database for pathway annotation enrichment...")
+enrichment_res = run_functional_enrichment_pipeline(", ".join(influential_genes))
+
+# Extract the data cleanly from the dictionary payload
+if isinstance(enrichment_res, dict):
+    enrichment_context = enrichment_res["text_context"]
+    discovered_focus_area = enrichment_res["top_pathway"]
+else:
+    enrichment_context = enrichment_res
+    discovered_focus_area = "therapeutic target"
+
+st.write(f"🎯 **Discovered Pathway Focus Area:** {discovered_focus_area}")
+
+# Stage 3: Live PubMed Literature Tracking Loop
+st.write(f"3. Launching literature miner loop targeting: {discovered_focus_area}...")
+pubmed_accumulator = []
+for target in influential_genes[:4]:
+    st.write(f"   • Mining live validation proof for: {target}")
+    # Bypasses hardcoded inputs; dynamically joins the gene with the enriched pathway
+    pubmed_accumulator.append(run_pubmed_literature_pipeline(target, discovered_focus_area))
+combined_pubmed_context = "\n".join(pubmed_accumulator)
+
             
             # Step 5: Initialize the Agent & Build Augmented RAG Prompt Packet
             st.write("5. Directing all clean knowledge streams to Gemini Core Synthesis Lead...")
