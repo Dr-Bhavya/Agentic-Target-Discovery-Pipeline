@@ -31,7 +31,7 @@ with st.sidebar:
     st.caption("Genes scoring below this mathematical average will be pruned.")
 def run_network_topology_pipeline(gene_list_str: str) -> dict:
     """Hits STRING API, builds network graph via NetworkX, and computes mathematical centralities."""
-    genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
+    genes = [g.strip().upper() for g in gene_list_str.split("\n") if g.strip()]
     if not genes: 
         return {"status": "error", "message": "No valid gene symbols provided."}
     
@@ -90,9 +90,10 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     
     status_msg = "Calculated via Local Failsafe Engine." if used_fallback else "Parsed via Remote STRING API."
     return {"status": "success", "df": df, "raw_text": f"Mapped {len(G.nodes())} markers. {status_msg}"}
+
 def run_functional_enrichment_pipeline(gene_list_str: str) -> str:
     """Fetches enrichment pathways from the correct STRING enrichment path."""
-    genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
+    genes = [g.strip().upper() for g in gene_list_str.split("\n") if g.strip()]
     url = "https://string-db.org"
     try:
         res = requests.post(url, data={"identifiers": "\n".join(genes), "species": 9606}, timeout=5)
@@ -122,7 +123,7 @@ def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
         return f"- **{gene}**: Real-time PubMed crawler bypassed. Proceeding with network topology context."
 # Main interface layout text entry blocks
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
-input_genes = st.text_area("Provide a comma-separated list of Gene Symbols:", value=default_genes, height=70)
+input_genes = st.text_area("Provide Gene Symbols (one per line):", value="\n".join(default_genes.split(", ")), height=150)
 disease_focus = st.text_input("Target Disease / Condition Focus Area:", value="Endothelial Dysfunction")
 
 if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
