@@ -29,6 +29,7 @@ with st.sidebar:
     st.header("🎛️ Topology Filter Switch")
     topological_cutoff = st.slider("Consensus Score Threshold (Cutoff)", 0.1, 0.9, 0.35, step=0.05)
     st.caption("Genes scoring below this mathematical average will be pruned.")
+    
 def run_network_topology_pipeline(gene_list_str: str) -> dict:
     """Hits STRING API, builds network graph via NetworkX, and computes mathematical centralities."""
     genes = [g.strip().upper() for g in gene_list_str.split("\n") if g.strip()]
@@ -118,20 +119,42 @@ def run_functional_enrichment_pipeline(gene_list_str: str) -> dict:
 
 
 def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
-    """Queries official NCBI PubMed production endpoints for RAG text lookup."""
+    """Queries official NCBI PubMed search and summary endpoints to return numbered text citations."""
     gene = target_gene.upper().strip()
     disease_clean = disease.replace(" ", "+")
-    url = f"https://nih.gov{gene}[Title/Abstract]+AND+{disease_clean}[Title/Abstract]+AND+target&retmode=json&retmax=2"
+    
+    # Step 1: Search for the paper IDs
+    search_url = f"https://nih.gov{gene}[Title/Abstract]+AND+{disease_clean}[Title/Abstract]+AND+target&retmode=json&retmax=2"
+    
     try:
-        res = requests.get(url, timeout=5).json()
-        id_list = res.get("esearchresult", {}).get("idlist", [])
+        search_res = requests.get(search_url, timeout=5).json()
+        id_list = search_res.get("esearchresult", {}).get("idlist", [])
+        
         if not id_list: 
             return f"- **{gene}**: No explicit validation publications discovered on PubMed linking it to {disease}."
-        # Generates live, clickable hyperlinks for each paper found
-        live_links = [f"[PMID: {pmid}](https://nih.gov{pmid}/)" for pmid in id_list]
-        return f"- **{gene}**: Target validation papers found. References: {', '.join(live_links)}."
+        
+        # Step 2: Query the summary endpoint for titles and journals
+        summary_url = f"https://nih.gov{','.join(id_list)}&retmode=json"
+        summary_res = requests.get(summary_url, timeout=5).json()
+        summary_results = summary_res.get("result", {})
+        
+        # Step 3: Loop and assign index numbers [1], [2], etc.
+        compiled_references = []
+        for index, pmid in enumerate(id_list, start=1):
+            paper_info = summary_results.get(pmid, {})
+            title = paper_info.get("title", "Biomedical validation study")
+            pub_date = paper_info.get("pubdate", "2026")
+            source = paper_info.get("source", "PubMed Record")
+            
+            # Format line item with standard bracket numbers
+            citation_text = f"[{index}] *{title}* - **{source}** ({pub_date}). [PubMed Link](https://nih.gov{pmid}/)"
+            compiled_references.append(citation_text)
+            
+        return f"- **{gene}** Target Verification payload:\n  " + "\n  ".join(compiled_references)
+        
     except Exception:
-        return f"- **{gene}**: Real-time PubMed crawler bypassed. Proceeding with network topology context."
+        return f"- **{gene}**: Real-time PubMed text crawler bypassed. Proceeding with network topology context."
+
         
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
 input_genes = st.text_area("Provide Gene Symbols (one per line):", value="\n".join(default_genes.split(", ")), height=150)
