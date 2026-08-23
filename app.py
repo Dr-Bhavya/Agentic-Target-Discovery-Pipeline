@@ -107,10 +107,10 @@ def run_functional_enrichment_pipeline(gene_list_str: str) -> dict:
             if results and isinstance(results, list):
                 terms = [f"- [{t.get('category')}] {t.get('description')} (FDR: {t.get('fdr'):.4e})" for t in results[:5]]
                 top_pathway_name = results[0].get('description', 'therapeutic target') if (results and isinstance(results, list)) else 'therapeutic target'
-return {
-    "text_context": "Top Enriched Pathway Alignments:\n" + "\n".join(terms),
-    "top_pathway": top_pathway_name
-}
+                return {
+                    "text_context": "Top Enriched Pathway Alignments:\n" + "\n".join(terms),
+                    "top_pathway": top_pathway_name
+                }
         return fallback_payload
     except Exception:
         return fallback_payload
