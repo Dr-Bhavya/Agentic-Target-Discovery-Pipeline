@@ -93,7 +93,7 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
 
 def run_functional_enrichment_pipeline(gene_list_str: str) -> dict:
     """Fetches enrichment pathways from the correct STRING enrichment path."""
-    genes = [str(g).strip().upper() for g in influential_genes_list if g]
+    genes = [str(g).strip().upper() for g in influential_genes if g]
     url = "https://string-db.org"
 
     fallback_payload = {
