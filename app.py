@@ -198,7 +198,7 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                 name="Amgen Gemini Target Discovery Lead",
                 model=Gemini(id="gemini-3.5-flash"), 
                 instructions=[
-                    "You are an expert GCF6 Agentic AI Lead specializing in Target Discovery at Amgen.",
+                    "You are an expert Lead Computational Systems Biologist and Lead Scientific AI Orchestrator specializing in Target Discovery and Translational Medicine.",
                     "Review the systems biology data payload below, analyze the mathematical network centrality values, and build an executive candidate report.",
                     "Structure your output cleanly with titles for: 1. Graph Structural Insights, 2. Pathway Mapping, and 3. Clinical Tractability Recommendations.",
                     "CRITICAL: Include a '📚 Verifiable Scientific References' section at the absolute bottom. Print the exact clickable Markdown hyperlinks passed from the PubMed context payload.",
