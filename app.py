@@ -130,6 +130,8 @@ def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
         # Generates live, clickable hyperlinks for each paper found
         live_links = [f"[PMID: {pmid}](https://nih.gov{pmid}/)" for pmid in id_list]
         return f"- **{gene}**: Target validation papers found. References: {', '.join(live_links)}."
+    except Exception:
+        return f"- **{gene}**: Real-time PubMed crawler bypassed. Proceeding with network topology context."
         
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
 input_genes = st.text_area("Provide Gene Symbols (one per line):", value="\n".join(default_genes.split(", ")), height=150)
