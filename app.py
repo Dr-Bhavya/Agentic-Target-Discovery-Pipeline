@@ -200,7 +200,7 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             
         with tab2:
             st.subheader("📊 Network Topology Architecture and Filter Metrics")
-            col1, col2 = st.columns()
+            col1, col2 = st.columns(2)
             
             with col1:
                 st.markdown("**🕸️ Programmatic Network View (NetworkX Canvas)**")
