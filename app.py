@@ -130,12 +130,10 @@ def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
         return f"- **{gene}**: Located validation research papers on PubMed. Associated PMIDs: {', '.join(id_list)}."
     except Exception:
         return f"- **{gene}**: Real-time PubMed crawler bypassed. Proceeding with network topology context."
-        
-# Main interface layout text entry blocks
+
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
 input_genes = st.text_area("Provide Gene Symbols (one per line):", value="\n".join(default_genes.split(", ")), height=150)
-# disease_focus = st.text_input("Target Disease / Condition Focus Area:", value="Endothelial Dysfunction")
-
+        
 if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
     if not user_api_key:
         st.error("Please add your free Google Gemini API key in the sidebar configuration layout.")
@@ -167,31 +165,29 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                 
             st.write(f"👉 Surviving Influential Targets ({len(influential_genes)}): {', '.join(influential_genes)}")
             
-            # Step 3: Run Enrichment via DAVID-style wrapper
-            # INSIDE Block 6, REPLACE Stage 3 and Stage 4 execution lines with this:
 
-# Stage 2: Functional Annotation Tracking (DAVID Wrapper)
-st.write("2. Routing prioritized gene list to database for pathway annotation enrichment...")
-enrichment_res = run_functional_enrichment_pipeline(", ".join(influential_genes))
+            # Stage 2: Functional Annotation Tracking (DAVID Wrapper)
+            st.write("2. Routing prioritized gene list to database for pathway annotation enrichment...")
+            enrichment_res = run_functional_enrichment_pipeline(", ".join(influential_genes))
 
-# Extract the data cleanly from the dictionary payload
-if isinstance(enrichment_res, dict):
-    enrichment_context = enrichment_res["text_context"]
-    discovered_focus_area = enrichment_res["top_pathway"]
-else:
-    enrichment_context = enrichment_res
-    discovered_focus_area = "therapeutic target"
+            # Extract the data cleanly from the dictionary payload
+            if isinstance(enrichment_res, dict):
+                enrichment_context = enrichment_res["text_context"]
+                discovered_focus_area = enrichment_res["top_pathway"]
+            else:
+                enrichment_context = enrichment_res
+                discovered_focus_area = "therapeutic target"
 
-st.write(f"🎯 **Discovered Pathway Focus Area:** {discovered_focus_area}")
+            st.write(f"🎯 **Discovered Pathway Focus Area:** {discovered_focus_area}")
 
-# Stage 3: Live PubMed Literature Tracking Loop
-st.write(f"3. Launching literature miner loop targeting: {discovered_focus_area}...")
-pubmed_accumulator = []
-for target in influential_genes[:4]:
-    st.write(f"   • Mining live validation proof for: {target}")
-    # Bypasses hardcoded inputs; dynamically joins the gene with the enriched pathway
-    pubmed_accumulator.append(run_pubmed_literature_pipeline(target, discovered_focus_area))
-combined_pubmed_context = "\n".join(pubmed_accumulator)
+            # Stage 3: Live PubMed Literature Tracking Loop
+            st.write(f"3. Launching literature miner loop targeting: {discovered_focus_area}...")
+            pubmed_accumulator = []
+            for target in influential_genes[:4]:
+                st.write(f"   • Mining live validation proof for: {target}")
+                # Bypasses hardcoded inputs; dynamically joins the gene with the enriched pathway
+                pubmed_accumulator.append(run_pubmed_literature_pipeline(target, discovered_focus_area))
+            combined_pubmed_context = "\n".join(pubmed_accumulator)
 
             
             # Step 5: Initialize the Agent & Build Augmented RAG Prompt Packet
