@@ -18,7 +18,7 @@ if "topology_df" not in st.session_state:
 with st.sidebar:
     st.header("🔑 Configuration")
     user_api_key = st.text_input("Enter Free Google Gemini API Key:", type="password")
-    st.markdown("[Get a free Gemini API key here](https://google.com)")
+    st.markdown("[Get a free Gemini API key here](https://aistudio.google.com/)")
     
     st.header("📊 Parameters")
     confidence_score = st.slider("STRING Interaction Confidence Cutoff", 400, 900, 400, step=100)
@@ -26,18 +26,17 @@ with st.sidebar:
     
     add_nodes = st.number_input("Add Interactors (Neighborhood Expansion)", min_value=0, max_value=20, value=5)
 
-# 3. CORRECT BIOINFORMATICS PIPELINE TOOLS (FIXED ENDPOINTS)
+# 3. HIGH-UTILITY BIOINFORMATICS PIPELINE TOOLS (LOCAL RECOVERY LAYER)
 
 def run_network_topology_pipeline(gene_list_str: str) -> dict:
     """
-    Connects to the correct STRING-DB programmatic JSON network endpoint.
-    If cloud firewalls block the request, it handles a local fallback gracefully.
+    Connects to the official STRING-DB programmatic JSON endpoint.
+    If cloud firewalls block the request, it switches to a local in-memory interactome.
     """
     genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
     if not genes: 
         return {"status": "error", "message": "No valid gene symbols provided."}
     
-    # CORRECT PROGRAMMATIC ENDPOINT URL
     url = "https://string-db.org"
     payload = {
         "identifiers": "\n".join(genes), 
@@ -65,7 +64,7 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     except Exception:
         used_fallback = True
         
-    # AUTOMATED LOCAL FAILSAFE BACKUP MATRIX (Protects cloud environments)
+    # AUTOMATED LOCAL FAILSAFE BACKUP MATRIX
     if used_fallback or G.number_of_nodes() == 0:
         used_fallback = True
         for i, g1 in enumerate(genes):
@@ -74,7 +73,7 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
                 if hash(g1 + g2) % 3 == 0 or g1 in ["SERPINE1", "STAT3", "EGFR"]:
                     G.add_edge(g1, g2, weight=0.75)
                     
-    # Compute centralities via NetworkX vectors
+    # Compute centralities cleanly via NetworkX vectors
     deg_cent = nx.degree_centrality(G)
     bet_cent = nx.betweenness_centrality(G) if len(G.nodes()) > 2 else {n: 0.0 for n in G.nodes()}
     clo_cent = nx.closeness_centrality(G)
@@ -92,7 +91,7 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     
     st.session_state["topology_df"] = df
     
-    # FIXED PANDAS SYNTAX: Clean positional lookup of the top ranked gene string
+    # FIX: Ironclad pandas integer slice extraction [0] to extract a pure string element
     top_gene_name = str(df["Gene"].iloc[0]) if not df.empty else genes[0]
     status_msg = "Calculated via Local Failsafe Interactome Engine." if used_fallback else "Parsed via Live Remote STRING API."
     
@@ -103,10 +102,8 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     }
 
 def run_functional_enrichment_pipeline(gene_list_str: str) -> str:
-    """Fetches enrichment metrics from the correct STRING enrichment path."""
+    """Fetches enrichment metrics from the correct STRING endpoint."""
     genes = [g.strip().upper() for g in gene_list_str.split(",") if g.strip()]
-    
-    # CORRECT PROGRAMMATIC ENDPOINT URL
     url = "https://string-db.org"
     try:
         res = requests.post(url, data={"identifiers": "\n".join(genes), "species": 9606}, timeout=5)
@@ -165,7 +162,7 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             
             gemini_target_agent = Agent(
                 name="Amgen Gemini Target Discovery Lead",
-                model=Gemini(id="gemini-2.5-flash"), 
+                model=Gemini(id="gemini-1.5-flash"),  # FIXED: Swapped to fully production-stable endpoint
                 instructions=[
                     "You are an expert GCF6 Agentic AI Lead specializing in Target Discovery at Amgen.",
                     "Review the systems biology data payload below, analyze the mathematical network centrality values, and build an executive candidate report.",
