@@ -127,10 +127,10 @@ def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
         id_list = res.get("esearchresult", {}).get("idlist", [])
         if not id_list: 
             return f"- **{gene}**: No explicit validation publications discovered on PubMed linking it to {disease}."
-        return f"- **{gene}**: Located validation research papers on PubMed. Associated PMIDs: {', '.join(id_list)}."
-    except Exception:
-        return f"- **{gene}**: Real-time PubMed crawler bypassed. Proceeding with network topology context."
-
+        # Generates live, clickable hyperlinks for each paper found
+        live_links = [f"[PMID: {pmid}](https://nih.gov{pmid}/)" for pmid in id_list]
+        return f"- **{gene}**: Target validation papers found. References: {', '.join(live_links)}."
+        
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
 input_genes = st.text_area("Provide Gene Symbols (one per line):", value="\n".join(default_genes.split(", ")), height=150)
         
@@ -199,6 +199,7 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                     "You are an expert GCF6 Agentic AI Lead specializing in Target Discovery at Amgen.",
                     "Review the systems biology data payload below, analyze the mathematical network centrality values, and build an executive candidate report.",
                     "Structure your output cleanly with titles for: 1. Graph Structural Insights, 2. Pathway Mapping, and 3. Clinical Tractability Recommendations.",
+                    "CRITICAL: Include a '📚 Verifiable Scientific References' section at the absolute bottom. Print the exact clickable Markdown hyperlinks passed from the PubMed context payload.",
                 ],
                 markdown=True,
             )
