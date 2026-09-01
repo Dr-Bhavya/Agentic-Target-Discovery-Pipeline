@@ -182,7 +182,7 @@ def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
             source_journal = paper_info.get("source", "PubMed Central Index")
             
             # Formats an ironclad, hyperlinked scientific citation line item
-            citation_text = f"[{index}] *{title}* - **{source_journal}** ({pub_date_str}). [PubMed Link](https://nih.gov{pmid}/)"
+            citation_text = f"[{index}] *{title}* - **{source_journal}** ({pub_date_str}). [PubMed Link](https://pubmed.ncbi.nlm.nih.gov/{pmid}/)"
             compiled_references.append(citation_text)
             
         return f"- **{gene}** Target Verification payload:\n  " + "\n  ".join(compiled_references)
