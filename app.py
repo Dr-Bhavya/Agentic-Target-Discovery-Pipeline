@@ -4,6 +4,7 @@ import requests
 import networkx as nx
 import pandas as pd
 import matplotlib.pyplot as plt
+import time
 from phi.agent import Agent
 from phi.model.google import Gemini
 
@@ -324,6 +325,7 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                 st.write(f"   • Mining live validation proof for: {target}")
                 # Bypasses hardcoded inputs; dynamically joins the gene with the enriched pathway
                 pubmed_accumulator.append(run_pubmed_literature_pipeline(target, discovered_focus_area))
+                time.sleep(1.5) 
             combined_pubmed_context = "\n".join(pubmed_accumulator)
 
             
