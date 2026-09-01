@@ -1,6 +1,6 @@
 streamlit
 phidata
-google-generativeai
+groq
 requests
 networkx
 pandas
