@@ -224,7 +224,7 @@ if st.button("🚀 Run Multi-Agent Analytical Pipeline"):
                 if not formatted_omim.empty:
                     st.dataframe(formatted_omim, use_container_width=True)
                 else:
-            st.info("No explicit OMIM profiles matched or returned by DAVID.")
+                    st.info("No explicit OMIM profiles matched or returned by DAVID.")
 
         # --- TAB 3: AGENTIC INTERPRETATION MATRIX ---
         with tab3:
