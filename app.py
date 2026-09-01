@@ -388,7 +388,6 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
         with tab1:
             st.subheader("📋 Consolidated Master Target Dossier")
             st.markdown(agent_content_output)
-            st.markdown(agent_response.content)
             
         with tab2:
             st.subheader("📊 Network Topology Architecture and Filter Metrics")
