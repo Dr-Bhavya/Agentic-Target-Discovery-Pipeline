@@ -92,9 +92,11 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     status_msg = "Calculated via Local Failsafe Engine." if used_fallback else "Parsed via Remote STRING API."
     return {"status": "success", "df": df, "raw_text": f"Mapped {len(G.nodes())} markers. {status_msg}"}
 
-def run_functional_enrichment_pipeline(gene_list_str: str) -> dict:
+def run_functional_enrichment_pipeline(influential_genes_list: list) -> dict:
     """Fetches enrichment pathways from the correct STRING enrichment path."""
-    genes = [str(g).strip().upper() for g in influential_genes if g]
+    if not influential_genes_list:
+        return {"text_context": "No input genes", "top_pathway": "therapeutic target"}
+    genes = [str(g).strip().upper() for g in influential_genes_list if g]
     url = "https://string-db.org"
 
     fallback_payload = {
@@ -191,37 +193,7 @@ def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
             fallback_links = [f"[{i}] {gene} Structural Validation Record. [PubMed Link](https://nih.gov{pmid}/)" for i, pmid in enumerate(id_list, start=1)]
             return f"- **{gene}** Target Verification payload:\n  " + "\n  ".join(fallback_links)
         return f"- **{gene}**: Real-time PubMed text crawler bypassed. Proceeding with network topology context."
-
-
-        
-        # Step 2: FIXED URL - Added missing '/eutils/' directory path to prevent 404 crash
-        summary_url = f"https://nih.gov{','.join(id_list)}&retmode=json"
-        summary_res = requests.get(summary_url, timeout=5).json()
-        summary_results = summary_res.get("result", {})
-        
-        # Step 3: Loop and assign index numbers
-        compiled_references = []
-        for index, pmid in enumerate(id_list, start=1):
-            paper_info = summary_results.get(pmid, {})
-            title = paper_info.get("title", f"{gene} Therapeutic Target Study")
-            pub_date = paper_info.get("pubdate", "2026").split(" ")[0] # Grabs just the year cleanly
-            source = paper_info.get("source", "PubMed Record")
-            
-            # Format line item with standard bracket numbers and live markdown hyperlinks
-            citation_text = f"[{index}] *{title}* - **{source}** ({pub_date}). [PubMed Link](https://nih.gov{pmid}/)"
-            compiled_references.append(citation_text)
-            
-        return f"- **{gene}** Target Verification payload:\n  " + "\n  ".join(compiled_references)
-        
-    except Exception as e:
-        # Failsafe fallback: Provides direct, un-summarized clickable hyperlinks if JSON parsing fails
-        if 'id_list' in locals() and id_list:
-            fallback_links = [f"[{i}] {gene} Research Paper. [PubMed Link](https://nih.gov{pmid}/)" for i, pmid in enumerate(id_list, start=1)]
-            return f"- **{gene}** Target Verification payload:\n  " + "\n  ".join(fallback_links)
-        return f"- **{gene}**: Real-time PubMed text crawler bypassed. Proceeding with network topology context."
-
-
-        
+       
 default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
 input_genes = st.text_area("Provide Gene Symbols (one per line):", value="\n".join(default_genes.split(", ")), height=150)
         
@@ -259,7 +231,7 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
 
             # Stage 2: Functional Annotation Tracking (DAVID Wrapper)
             st.write("2. Routing prioritized gene list to database for pathway annotation enrichment...")
-            enrichment_res = run_functional_enrichment_pipeline(", ".join(influential_genes))
+            enrichment_res = run_functional_enrichment_pipeline(influential_genes)
 
             # Extract the data cleanly from the dictionary payload
             if isinstance(enrichment_res, dict):
