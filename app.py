@@ -352,8 +352,34 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             {combined_pubmed_context}
             """
             
-            agent_response = gemini_target_agent.run(augmented_prompt)
-            status.update(label="✅ Discovery Pipeline Synthesis Complete!", state="complete")
+            # Create a fallback placeholder string variable
+            agent_content_output = ""
+            
+            try:
+                # Attempt to execute the core text summary generation request
+                agent_response = gemini_target_agent.run(augmented_prompt)
+                status.update(label="✅ Discovery Pipeline Synthesis Complete!", state="complete")
+                agent_content_output = agent_response.content
+                
+            except Exception as api_error:
+                # 🎯 THE FIX: Intercepts the quota error and gracefully keeps the dashboard functional
+                status.update(label="⚠️ AI Synthesis Rate-Limit Encountered", state="error")
+                
+                if "ResourceExhausted" in str(api_error) or "429" in str(api_error):
+                    agent_content_output = """
+                    ### ⚠️ Short-Term API Rate Limit Triggered (429)
+                    Your 30-gene request triggered a high-frequency traffic limit from your current project location.
+                    
+                    **💡 What to do next:**
+                    1. Wait exactly **60 seconds** for Google's internal minute-window block to cool down.
+                    2. Reduce the list size slightly or re-run the pipeline execution step.
+                    
+                    **📊 Your Analytics Are Safe:**
+                    Your raw centralities and clinical disease associations are fully generated! Look at the **Network Topology Analytics** and **Multi-Omics Enrichment Studio** tabs to view your tables.
+                    """
+                else:
+                    agent_content_output = f"An unexpected connection error occurred: {str(api_error)}"
+
         # Structured Tab Layout initialization 
         st.markdown("---")
         # Define 3 isolated dashboard workspaces
