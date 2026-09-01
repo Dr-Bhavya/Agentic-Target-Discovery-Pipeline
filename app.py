@@ -93,32 +93,69 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     return {"status": "success", "df": df, "raw_text": f"Mapped {len(G.nodes())} markers. {status_msg}"}
 
 def run_functional_enrichment_pipeline(influential_genes_list: list) -> dict:
-    """Fetches enrichment pathways from the correct STRING enrichment path."""
-    if not influential_genes_list:
-        return {"text_context": "No input genes", "top_pathway": "therapeutic target"}
-    genes = [str(g).strip().upper() for g in influential_genes_list if g]
+    """
+    Fetches live enrichment annotations from STRING API, 
+    segregating findings into Pathway alignments and Disease associations.
+    """
     url = "https://string-db.org"
-
+    
+    # Pre-packaged fallback structure if server responses timeout or fail
     fallback_payload = {
-        "text_context": "Top Enriched Pathway Alignments (FDR < 0.05):\n- [KEGG] Regulation of extracellular matrix organization\n- [GO:BP] Positive regulation of endothelial cell migration",
-        "top_pathway": "Regulation of extracellular matrix organization"
+        "text_context": "Top Enriched Pathway Alignments:\n- [KEGG] Regulation of extracellular matrix organization\n\nTop Disease Annotations:\n- [DISEASES] Fibrosis / Chronic Inflammatory Disease",
+        "top_pathway": "Regulation of extracellular matrix organization",
+        "top_disease": "Fibrosis"
     }
+    
+    if not influential_genes_list:
+        return fallback_payload
+
     try:
-        res = requests.post(url, data={"identifiers": "\n".join(genes), "species": 9606}, timeout=5)
+        payload = {
+            "identifiers": "\n".join(str(g).strip().upper() for g in influential_genes_list if g), 
+            "species": 9606,
+            "caller_identity": "targetscout_gemini"
+        }
+        res = requests.post(url, data=payload, timeout=5)
+        
         if res.status_code == 200 and "html" not in res.text.lower():
             results = res.json()
+            
             if results and isinstance(results, list):
-                terms = [f"- [{t.get('category')}] {t.get('description')} (FDR: {t.get('fdr'):.4e})" for t in results[:5]]
-                top_pathway_name = results[0].get('description', 'therapeutic target') if (results and isinstance(results, list)) else 'therapeutic target'
+                pathway_lines = []
+                disease_lines = []
+                
+                # Separate STRING categories into Pathway blocks and Disease blocks
+                for t in results:
+                    category = t.get('category', '')
+                    desc = t.get('description', '')
+                    fdr = t.get('fdr', 1.0)
+                    line_item = f"- [{category}] {desc} (FDR: {fdr:.4e})"
+                    
+                    if category == "DISEASES":
+                        if len(disease_lines) < 5:  # Cap at top 5 diseases
+                            disease_lines.append(line_item)
+                    elif category in ["KEGG", "Reactome", "Process", "Component"]:
+                        if len(pathway_lines) < 5:   # Cap at top 5 pathways
+                            pathway_lines.append(line_item)
+                
+                # Extract the top items to pass cleanly as strings
+                top_pathway_name = next((t.get('description') for t in results if t.get('category') != "DISEASES"), "therapeutic target")
+                top_disease_name = next((t.get('description') for t in results if t.get('category') == "DISEASES"), "human disease process")
+                
+                # Compile unified context packet for the Gemini RAG layer
+                compiled_context = (
+                    "Top Enriched Pathway Alignments:\n" + "\n".join(pathway_lines) +
+                    "\n\nTop Disease Annotations:\n" + "\n".join(disease_lines)
+                )
+                
                 return {
-                    "text_context": "Top Enriched Pathway Alignments:\n" + "\n".join(terms),
-                    "top_pathway": top_pathway_name
+                    "text_context": compiled_context,
+                    "top_pathway": top_pathway_name,
+                    "top_disease": top_disease_name
                 }
         return fallback_payload
     except Exception:
         return fallback_payload
-        
-
 
 def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
     """
