@@ -93,15 +93,11 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     return {"status": "success", "df": df, "raw_text": f"Mapped {len(G.nodes())} markers. {status_msg}"}
 
 def run_functional_enrichment_pipeline(influential_genes_list: list) -> dict:
-    """
-    Fetches live enrichment annotations from STRING API, 
-    segregating findings into Pathway alignments and Disease associations.
-    """
+    """Fetches enrichment pathways and diseases from STRING and builds DataFrames."""
     url = "https://string-db.org"
     
-    # Pre-packaged fallback structure if server responses timeout or fail
     fallback_payload = {
-        "text_context": "Top Enriched Pathway Alignments:\n- [KEGG] Regulation of extracellular matrix organization\n\nTop Disease Annotations:\n- [DISEASES] Fibrosis / Chronic Inflammatory Disease",
+        "text_context": "Top Enriched Pathway Alignments (FDR < 0.05):\n- [KEGG] Regulation of extracellular matrix organization",
         "top_pathway": "Regulation of extracellular matrix organization",
         "top_disease": "Fibrosis"
     }
@@ -121,35 +117,49 @@ def run_functional_enrichment_pipeline(influential_genes_list: list) -> dict:
             results = res.json()
             
             if results and isinstance(results, list):
-                pathway_lines = []
-                disease_lines = []
+                pathway_data = []
+                disease_data = []
+                functional_data = []
                 
-                # Separate STRING categories into Pathway blocks and Disease blocks
                 for t in results:
                     category = t.get('category', '')
                     desc = t.get('description', '')
                     fdr = t.get('fdr', 1.0)
-                    line_item = f"- [{category}] {desc} (FDR: {fdr:.4e})"
+                    genes_involved = ", ".join(t.get('inputGenes', []))
                     
+                    data_row = {
+                        "Description": desc, 
+                        "Source": category, 
+                        "FDR": fdr, 
+                        "Matching Genes": genes_involved
+                    }
+                    
+                    # Split into 3 strict categories
                     if category == "DISEASES":
-                        if len(disease_lines) < 5:  # Cap at top 5 diseases
-                            disease_lines.append(line_item)
-                    elif category in ["KEGG", "Reactome", "Process", "Component"]:
-                        if len(pathway_lines) < 5:   # Cap at top 5 pathways
-                            pathway_lines.append(line_item)
+                        disease_data.append(data_row)
+                    elif category in ["KEGG", "Reactome"]:
+                        pathway_data.append(data_row)
+                    elif category in ["GO:BP", "Process", "Component", "Function"]:
+                        functional_data.append(data_row)
                 
-                # Extract the top items to pass cleanly as strings
-                top_pathway_name = next((t.get('description') for t in results if t.get('category') != "DISEASES"), "therapeutic target")
-                top_disease_name = next((t.get('description') for t in results if t.get('category') == "DISEASES"), "human disease process")
+                # Convert to structured DataFrames and cache them
+                path_df = pd.DataFrame(pathway_data).sort_values(by="FDR").reset_index(drop=True)
+                dis_df = pd.DataFrame(disease_data).sort_values(by="FDR").reset_index(drop=True)
+                func_df = pd.DataFrame(functional_data).sort_values(by="FDR").reset_index(drop=True)
                 
-                # Compile unified context packet for the Gemini RAG layer
-                compiled_context = (
-                    "Top Enriched Pathway Alignments:\n" + "\n".join(pathway_lines) +
-                    "\n\nTop Disease Annotations:\n" + "\n".join(disease_lines)
-                )
+                st.session_state["pathway_df"] = path_df
+                st.session_state["disease_df"] = dis_df
+                st.session_state["functional_df"] = func_df
+                
+                # Format text summary strings for the AI Agent's RAG prompt context
+                pathway_terms = [f"- [{r['Source']}] {r['Description']} (FDR: {r['FDR']:.4e})" for _, r in path_df.head(5).iterrows()]
+                disease_terms = [f"- [{r['Source']}] {r['Description']} (FDR: {r['FDR']:.4e})" for _, r in dis_df.head(5).iterrows()]
+                
+                top_pathway_name = path_df.iloc[0]["Description"] if not path_df.empty else "therapeutic target"
+                top_disease_name = dis_df.iloc[0]["Description"] if not dis_df.empty else "human pathology"
                 
                 return {
-                    "text_context": compiled_context,
+                    "text_context": "Top Pathways:\n" + "\n".join(pathway_terms) + "\n\nTop Diseases:\n" + "\n".join(disease_terms),
                     "top_pathway": top_pathway_name,
                     "top_disease": top_disease_name
                 }
@@ -317,7 +327,8 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             status.update(label="✅ Discovery Pipeline Synthesis Complete!", state="complete")
         # Structured Tab Layout initialization 
         st.markdown("---")
-        tab1, tab2 = st.tabs(["📋 Executive Target Dossier", "📊 Network Topology Analytics"])
+        # Define 3 isolated dashboard workspaces
+        tab1, tab2, tab3 = st.tabs(["📋 Executive Target Dossier", "📊 Network Topology Analytics", "🧬 Multi-Omics Enrichment Studio"])
         
         with tab1:
             st.subheader("📋 Consolidated Master Target Dossier")
@@ -352,4 +363,33 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                         return [color] * len(row)
                     
                     styled_df = st.session_state["topology_df"].style.apply(highlight_survivors, axis=1)
-                    st.dataframe(styled_df, use_container_width=True)
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+        with tab3:
+            st.subheader("🧬 Comprehensive Biological Target Enrichment")
+            st.caption("Live pathway alignments, functional ontologies, and clinical disease markers grouped in one section.")
+            
+            # Row Layout: Three Structured Enrichment Tables Stacking Side-by-Side
+            enc_col1, enc_col2, enc_col3 = st.columns(3)
+            
+            with enc_col1:
+                st.markdown("**🔍 1. Functional Annotations (GO Terms)**")
+                if st.session_state.get("functional_df") is not None and not st.session_state["functional_df"].empty:
+                    st.dataframe(st.session_state["functional_df"], use_container_width=True, hide_index=True)
+                else:
+                    st.info("No active functional ontologies logged above significance cutoff thresholds.")
+            
+            with enc_col2:
+                st.markdown("**🌿 2. Pathway Alignments (KEGG / Reactome)**")
+                if st.session_state.get("pathway_df") is not None and not st.session_state["pathway_df"].empty:
+                    st.dataframe(st.session_state["pathway_df"], use_container_width=True, hide_index=True)
+                else:
+                    st.info("No active pathway data matched the surviving target configuration.")
+                    
+            with enc_col3:
+                st.markdown("**🏥 3. Disease Ontologies & Clinical Indications**")
+                if st.session_state.get("disease_df") is not None and not st.session_state["disease_df"].empty:
+                    st.dataframe(st.session_state["disease_df"], use_container_width=True, hide_index=True)
+                else:
+                    st.info("No explicit disease mapping associations recorded above threshold limits.")
+
