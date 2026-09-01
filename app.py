@@ -92,8 +92,8 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     status_msg = "Calculated via Local Failsafe Engine." if used_fallback else "Parsed via Remote STRING API."
     return {"status": "success", "df": df, "raw_text": f"Mapped {len(G.nodes())} markers. {status_msg}"}
 
-def run_functional_enrichment_pipeline(influential_genes_list: list) -> dict:
-    """Fetches enrichment pathways and diseases from STRING and builds DataFrames."""
+def run_functional_enrichment_pipeline(gene_list_str: str) -> dict:
+    """Fetches enrichment metrics for ALL user input genes, skipping topological pruning."""
     url = "https://string-db.org"
     
     fallback_payload = {
@@ -102,12 +102,15 @@ def run_functional_enrichment_pipeline(influential_genes_list: list) -> dict:
         "top_disease": "Fibrosis"
     }
     
-    if not influential_genes_list:
+    # Clean and split the raw multiline/comma string into a flat Python array list
+    cleaned_genes = [g.strip().upper() for g in gene_list_str.replace(",", "\n").split("\n") if g.strip()]
+    
+    if not cleaned_genes:
         return fallback_payload
 
     try:
         payload = {
-            "identifiers": "\n".join(str(g).strip().upper() for g in influential_genes_list if g), 
+            "identifiers": "\n".join(cleaned_genes), 
             "species": 9606,
             "caller_identity": "targetscout_gemini"
         }
@@ -134,7 +137,6 @@ def run_functional_enrichment_pipeline(influential_genes_list: list) -> dict:
                         "Matching Genes": genes_involved
                     }
                     
-                    # Split into 3 strict categories
                     if category == "DISEASES":
                         disease_data.append(data_row)
                     elif category in ["KEGG", "Reactome"]:
@@ -142,7 +144,6 @@ def run_functional_enrichment_pipeline(influential_genes_list: list) -> dict:
                     elif category in ["GO:BP", "Process", "Component", "Function"]:
                         functional_data.append(data_row)
                 
-                # Convert to structured DataFrames and cache them
                 path_df = pd.DataFrame(pathway_data).sort_values(by="FDR").reset_index(drop=True)
                 dis_df = pd.DataFrame(disease_data).sort_values(by="FDR").reset_index(drop=True)
                 func_df = pd.DataFrame(functional_data).sort_values(by="FDR").reset_index(drop=True)
@@ -151,7 +152,6 @@ def run_functional_enrichment_pipeline(influential_genes_list: list) -> dict:
                 st.session_state["disease_df"] = dis_df
                 st.session_state["functional_df"] = func_df
                 
-                # Format text summary strings for the AI Agent's RAG prompt context
                 pathway_terms = [f"- [{r['Source']}] {r['Description']} (FDR: {r['FDR']:.4e})" for _, r in path_df.head(5).iterrows()]
                 disease_terms = [f"- [{r['Source']}] {r['Description']} (FDR: {r['FDR']:.4e})" for _, r in dis_df.head(5).iterrows()]
                 
@@ -276,11 +276,12 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             st.write(f"👉 Surviving Influential Targets ({len(influential_genes)}): {', '.join(influential_genes)}")
             
 
-            # Stage 2: Functional Annotation Tracking (DAVID Wrapper)
-            st.write("2. Routing prioritized gene list to database for pathway annotation enrichment...")
-            enrichment_res = run_functional_enrichment_pipeline(influential_genes)
+            # Stage 2: Functional Annotation & Disease Enrichment Tracking
+            st.write("2. Routing full input gene list to database for pathway & disease annotations...")
+            
+            # 🎯 CHANGED: Swapped 'influential_genes' for 'input_genes' to process everything
+            enrichment_res = run_functional_enrichment_pipeline(input_genes)
 
-            # Extract the data cleanly from the dictionary payload
             if isinstance(enrichment_res, dict):
                 enrichment_context = enrichment_res["text_context"]
                 discovered_focus_area = enrichment_res["top_pathway"]
@@ -289,6 +290,7 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                 discovered_focus_area = "therapeutic target"
 
             st.write(f"🎯 **Discovered Pathway Focus Area:** {discovered_focus_area}")
+
 
             # Stage 3: Live PubMed Literature Tracking Loop
             st.write(f"3. Launching literature miner loop targeting: {discovered_focus_area}...")
