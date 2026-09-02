@@ -26,7 +26,7 @@ if "disease_df" not in st.session_state:
 with st.sidebar:
     st.header("🔑 Configuration")
     groq_api_key = st.text_input("Enter Groq API Key:", type="password")
-    groq_model = st.selectbox("Select Groq Model:", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"])
+    groq_model = st.selectbox("Select Groq Model:", ["qwen/qwen3.6-27b", "openai/gpt-oss-120b"])
     st.markdown("[Get your Groq API key here](https://groq.com)")
     
     st.header("📊 Network Parameters")
