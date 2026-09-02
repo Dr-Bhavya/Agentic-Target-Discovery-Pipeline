@@ -398,6 +398,11 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                 "If a pathway, disease, or literature item is marked as unavailable, say so plainly instead of "
                 "filling in a plausible-sounding substitute.",
                 "Explain how the influential genes cross-map into the enriched pathways and diseases provided.",
+                "Do NOT re-type, reformat, or paraphrase the individual PubMed citation lines or their links from "
+                "the literature evidence payload — a verbatim, correctly-linked reference list is appended "
+                "separately after your response. In your 'Literature Evidence Synthesis' section, only summarize "
+                "what the findings show and refer to sources by gene name (e.g. 'as shown in the EGFR literature "
+                "below'), without repeating titles, journals, or URLs yourself.",
                 "Maintain precise language fit for a biomedical research report dashboard.",
             ],
             markdown=True,
@@ -416,11 +421,18 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
 
         try:
             agent_response = orchestrator_agent.run(agent_prompt)
-            master_dossier_text = agent_response.content
+            master_dossier_text = (
+                agent_response.content
+                + "\n\n---\n\n### 📚 Literature References\n\n"
+                + combined_lit_context
+            )
             status.update(label="✅ Pipeline executed successfully!", state="complete")
         except Exception as e:
             status.update(label="⚠️ Summary generation interrupted", state="error")
-            master_dossier_text = f"An LLM API error occurred: {e}\n\nReview the structural charts in the tabs below."
+            master_dossier_text = (
+                f"An LLM API error occurred: {e}\n\nReview the structural charts in the tabs below.\n\n"
+                f"---\n\n### 📚 Literature References\n\n{combined_lit_context}"
+            )
 
     # ----------------------------------------------------------------------------------
     # Results layout
