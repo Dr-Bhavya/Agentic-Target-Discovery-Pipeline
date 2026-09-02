@@ -4,7 +4,6 @@
 #
 # Run with: streamlit run app.py
 
-import math
 import os
 import re
 import time
@@ -36,24 +35,11 @@ with st.sidebar:
 
     st.header("📊 Network Parameters")
     confidence_score = st.slider("STRING Confidence Cutoff", 150, 900, 400, step=50)
-
-    st.header("🎛️ Influential Gene Identification")
-    scoring_method = st.selectbox(
-        "Method",
-        [
-            "Rank Aggregation (Borda, recommended)",
-            "Maximal Clique Centrality (MCC)",
-            "Eigenvector Centrality",
-            "PageRank",
-            "Simple Average (Degree+Betweenness+Closeness)",
-        ],
-        help=(
-            "How the 'Consensus Rank Score' used for the cutoff below is computed. "
-            "All underlying metrics are always shown in the topology table regardless of choice."
-        ),
+    st.caption(
+        "Influential (hub) genes are identified automatically from Degree, Betweenness, and Closeness "
+        "Centrality — thresholds are derived from each metric's own mean + 1 standard deviation, no manual "
+        "cutoff needed."
     )
-    topological_cutoff = st.slider("Consensus Score Threshold (Cutoff)", 0.0, 1.0, 0.35, step=0.05)
-    st.caption("Genes scoring below this normalized (0-1) score under the chosen method are filtered out as non-influential.")
 
 STRING_API_URL = "https://string-db.org/api/json/network"
 ENRICHR_ADD_URL = "https://maayanlab.cloud/Enrichr/addList"
@@ -66,81 +52,70 @@ def parse_gene_list(gene_list_str: str) -> list:
     return sorted(set(g.strip().upper() for g in gene_list_str.replace(",", "\n").split("\n") if g.strip()))
 
 
-def _min_max_normalize(series: pd.Series) -> pd.Series:
-    lo, hi = series.min(), series.max()
-    if hi - lo < 1e-12:
-        return pd.Series([0.0] * len(series), index=series.index)
-    return (series - lo) / (hi - lo)
-
-
-def _maximal_clique_centrality(G: nx.Graph) -> dict:
-    """Chin et al. 2014 (cytoHubba): score(v) = sum over maximal cliques C containing v of (|C|-1)!"""
-    scores = {n: 0.0 for n in G.nodes()}
-    if G.number_of_nodes() == 0:
-        return scores
-    # Clique enumeration is fine for the sparse, small-to-mid PPI networks this app targets.
-    for clique in nx.find_cliques(G):
-        contribution = math.factorial(max(len(clique) - 1, 0))
-        for node in clique:
-            scores[node] += contribution
-    return scores
-
-
 def compute_topology_metrics(G: nx.Graph) -> pd.DataFrame:
-    """Computes several independent topological importance measures for every node."""
+    """Computes degree, betweenness, and closeness centrality for every node."""
     deg_cent = nx.degree_centrality(G)
     bet_cent = nx.betweenness_centrality(G) if G.number_of_nodes() > 2 else {n: 0.0 for n in G.nodes()}
     clo_cent = nx.closeness_centrality(G)
-
-    try:
-        eig_cent = nx.eigenvector_centrality_numpy(G, weight="weight")
-    except Exception:
-        eig_cent = {n: 0.0 for n in G.nodes()}
-
-    try:
-        page_rank = nx.pagerank(G, weight="weight")
-    except Exception:
-        page_rank = {n: 0.0 for n in G.nodes()}
-
-    mcc_scores = _maximal_clique_centrality(G)
 
     df = pd.DataFrame([{
         "Gene": node,
         "Degree Centrality": round(deg_cent[node], 4),
         "Betweenness Centrality": round(bet_cent[node], 4),
         "Closeness Centrality": round(clo_cent[node], 4),
-        "Eigenvector Centrality": round(eig_cent.get(node, 0.0), 4),
-        "PageRank": round(page_rank.get(node, 0.0), 4),
-        "MCC (raw)": mcc_scores.get(node, 0.0),
     } for node in G.nodes()])
     return df
 
 
-def compute_consensus_score(df: pd.DataFrame, method: str) -> pd.Series:
-    """Produces a normalized 0-1 'Consensus Rank Score' using the selected method."""
-    if method.startswith("Rank Aggregation"):
-        rank_cols = ["Degree Centrality", "Betweenness Centrality", "Closeness Centrality", "Eigenvector Centrality"]
-        ranks = df[rank_cols].rank(ascending=True, method="average")
-        avg_rank = ranks.mean(axis=1)
-        return _min_max_normalize(avg_rank)
+def flag_influential_genes(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Automatically identifies influential (hub) genes with no user-supplied cutoff.
 
-    if method.startswith("Maximal Clique"):
-        return _min_max_normalize(df["MCC (raw)"])
+    For each of the three centrality metrics independently, the threshold is derived
+    from the network's own distribution: mean + 1 standard deviation — the standard
+    statistical definition of a "hub" node in network biology. A gene is flagged as
+    influential if it clears that self-derived threshold on at least 2 of the 3 metrics
+    (majority vote), which is more robust than requiring unanimity or relying on a
+    single blended score.
+    """
+    metrics = ["Degree Centrality", "Betweenness Centrality", "Closeness Centrality"]
+    votes = pd.Series(0, index=df.index)
+    thresholds = {}
 
-    if method.startswith("Eigenvector"):
-        return _min_max_normalize(df["Eigenvector Centrality"])
+    for metric in metrics:
+        mean, std = df[metric].mean(), df[metric].std(ddof=0)
+        threshold = mean + std
+        thresholds[metric] = round(threshold, 4)
+        votes += (df[metric] > threshold).astype(int)
 
-    if method.startswith("PageRank"):
-        return _min_max_normalize(df["PageRank"])
+    df = df.copy()
+    df["Hub Votes (of 3)"] = votes
+    df["Influential"] = votes >= 2
 
-    # Simple Average (original behavior) — each input already lies in [0, 1]
-    return (df["Degree Centrality"] + df["Betweenness Centrality"] + df["Closeness Centrality"]) / 3
+    fallback_note = None
+    if not df["Influential"].any():
+        # Distribution too flat / network too small for mean+SD to separate anyone (e.g. a
+        # near-complete or very small graph). Relax to "clears the bar on at least one metric".
+        df["Influential"] = votes >= 1
+        fallback_note = "no gene cleared 2 of 3 auto-thresholds; relaxed to 1 of 3"
+
+    if not df["Influential"].any():
+        # Still nothing (e.g. a fully symmetric graph where every node is tied). Fall back to
+        # the single top-ranked gene by summed centrality so the pipeline can still proceed.
+        top_idx = (df[metrics].sum(axis=1)).idxmax()
+        df.loc[top_idx, "Influential"] = True
+        fallback_note = "network too symmetric for statistical thresholds; selected the single top-ranked gene"
+
+    df = df.sort_values(by=metrics, ascending=False).reset_index(drop=True)
+    df.attrs["thresholds"] = thresholds
+    df.attrs["fallback_note"] = fallback_note
+    return df
 
 
 # --------------------------------------------------------------------------------------
 # Agent 1: Network topology (STRING)
 # --------------------------------------------------------------------------------------
-def run_network_topology_pipeline(gene_list_str: str, required_score: int, method: str) -> dict:
+def run_network_topology_pipeline(gene_list_str: str, required_score: int) -> dict:
     """Builds a STRING-only interaction network and computes centrality metrics."""
     genes = parse_gene_list(gene_list_str)
     if not genes:
@@ -188,15 +163,19 @@ def run_network_topology_pipeline(gene_list_str: str, required_score: int, metho
         G.add_edge(p1, p2, weight=score)
 
     df = compute_topology_metrics(G)
-    df["Consensus Rank Score"] = round(compute_consensus_score(df, method), 4)
-    df = df.sort_values(by="Consensus Rank Score", ascending=False).reset_index(drop=True)
+    df = flag_influential_genes(df)
 
     edge_count = G.number_of_edges()
+    thresholds = df.attrs.get("thresholds", {})
+    threshold_str = ", ".join(f"{k} > {v}" for k, v in thresholds.items())
     message = (f"Live STRING network parsed successfully — {edge_count} interaction(s) found "
-               f"at confidence ≥ {required_score}, restricted strictly to your {len(genes)} input gene(s).")
+               f"at confidence ≥ {required_score}, restricted strictly to your {len(genes)} input gene(s). "
+               f"Auto-derived hub thresholds (mean + 1 SD): {threshold_str}.")
     if skipped_extra_nodes:
         message += (f" Note: STRING returned {len(skipped_extra_nodes)} additional node(s) not in your "
                      f"input list ({', '.join(sorted(skipped_extra_nodes))}) — these were excluded.")
+    if df.attrs.get("fallback_note"):
+        message += f" ⚠️ Fallback applied: {df.attrs['fallback_note']}."
 
     return {
         "status": "success",
@@ -342,8 +321,8 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
     os.environ["GROQ_API_KEY"] = groq_api_key
 
     with st.status("🕵️ Orchestrating Multi-Agent Discovery Pipeline across Omics Layers...", expanded=True) as status:
-        st.write(f"1. 🕸️ Network Analyst Agent → mapping STRING nodes & centralities ({scoring_method.split(' (')[0]})...")
-        net_results = run_network_topology_pipeline(input_genes, confidence_score, scoring_method)
+        st.write("1. 🕸️ Network Analyst Agent → mapping STRING nodes & centralities...")
+        net_results = run_network_topology_pipeline(input_genes, confidence_score)
         if net_results["status"] == "error":
             status.update(label="❌ Pipeline halted", state="error")
             st.error(net_results["message"])
@@ -355,15 +334,10 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
         st.session_state["topology_df"] = topology_df
         st.session_state["network_obj"] = network_graph
 
-        st.write(f"2. 🎛️ Filtering against Consensus Threshold (≥ {topological_cutoff})...")
-        surviving_df = topology_df[topology_df["Consensus Rank Score"] >= topological_cutoff].reset_index(drop=True)
+        st.write("2. 🎛️ Selecting influential (hub) genes via auto-derived centrality thresholds...")
+        surviving_df = topology_df[topology_df["Influential"]].reset_index(drop=True)
         influential_targets = surviving_df["Gene"].tolist()
         st.session_state["influential_targets"] = influential_targets
-
-        if not influential_targets:
-            status.update(label="❌ No targets survived the cutoff", state="error")
-            st.error("No genes survived the threshold. Try lowering the Consensus Score Threshold slider.")
-            st.stop()
         st.write(f"   Influential genes ({len(influential_targets)}): {', '.join(influential_targets)}")
 
         st.write("3. 🧬 Enrichment Analyst Agent → querying Enrichr for KEGG & OMIM terms...")
@@ -477,12 +451,15 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
             st.markdown("**📈 Centrality Matrix**")
             if st.session_state["topology_df"] is not None:
                 def highlight_survivors(row):
-                    color = "background-color: rgba(0, 229, 255, 0.12)" if row["Consensus Rank Score"] >= topological_cutoff else ""
+                    color = "background-color: rgba(0, 229, 255, 0.12)" if row["Influential"] else ""
                     return [color] * len(row)
 
                 styled_df = st.session_state["topology_df"].style.apply(highlight_survivors, axis=1)
                 st.dataframe(styled_df, use_container_width=True, hide_index=True)
-                st.caption("Rows highlighted in cyan are influential targets that satisfied the cutoff.")
+                st.caption(
+                    "Rows highlighted in cyan are influential (hub) genes — auto-flagged by clearing the "
+                    "mean + 1 SD threshold on at least 2 of the 3 centrality metrics."
+                )
 
     with tab3:
         st.subheader("🧬 Enrichment & Influential Target Mapping")
