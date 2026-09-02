@@ -153,6 +153,7 @@ def run_network_topology_pipeline(gene_list_str: str, required_score: int, metho
         "identifiers": "\n".join(genes),
         "species": 9606,
         "required_score": required_score,
+        "add_nodes": 0,  # explicitly forbid STRING from adding extra interactor nodes
         "caller_identity": "multi_agent_bio_workflow",
     }
 
@@ -170,24 +171,38 @@ def run_network_topology_pipeline(gene_list_str: str, required_score: int, metho
     if isinstance(interactions, dict) and interactions.get("Error"):
         return {"status": "error", "message": f"STRING API error: {interactions['Error']}"}
 
+    gene_set = set(genes)
+    skipped_extra_nodes = set()
     for edge in interactions:
         p1 = edge.get("preferredName_A", "").upper()
         p2 = edge.get("preferredName_B", "").upper()
         score = edge.get("score")
-        if p1 and p2:
-            G.add_edge(p1, p2, weight=score)
+        if not p1 or not p2:
+            continue
+        # Belt-and-suspenders: only keep edges strictly between genes the user actually supplied.
+        # STRING's identifier resolution can occasionally surface a synonym/alias node instead of
+        # the exact symbol queried, so this guards against silently growing the gene set.
+        if p1 not in gene_set or p2 not in gene_set:
+            skipped_extra_nodes.update({p1, p2} - gene_set)
+            continue
+        G.add_edge(p1, p2, weight=score)
 
     df = compute_topology_metrics(G)
     df["Consensus Rank Score"] = round(compute_consensus_score(df, method), 4)
     df = df.sort_values(by="Consensus Rank Score", ascending=False).reset_index(drop=True)
 
     edge_count = G.number_of_edges()
+    message = (f"Live STRING network parsed successfully — {edge_count} interaction(s) found "
+               f"at confidence ≥ {required_score}, restricted strictly to your {len(genes)} input gene(s).")
+    if skipped_extra_nodes:
+        message += (f" Note: STRING returned {len(skipped_extra_nodes)} additional node(s) not in your "
+                     f"input list ({', '.join(sorted(skipped_extra_nodes))}) — these were excluded.")
+
     return {
         "status": "success",
         "df": df,
         "graph": G,
-        "message": f"Live STRING network parsed successfully — {edge_count} interaction(s) found "
-                    f"at confidence ≥ {required_score}.",
+        "message": message,
     }
 
 
