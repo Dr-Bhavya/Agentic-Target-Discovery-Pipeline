@@ -6,34 +6,39 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import time
 from phi.agent import Agent
-from phi.model.google import Gemini
+from phi.model.groq import Groq
 
 # Streamlit Page Configuration
-st.set_page_config(page_title="Agentic Target Prioritization Funnel", layout="wide")
-st.title("🧬 TargetScout-AI: Systems Biology Target Funnel")
-st.caption("Powered by Google Gemini — A multi-stage target validation pipeline.")
+st.set_page_config(page_title="Multi-Agent Target Discovery Studio", layout="wide")
+st.title("🧬 Multi-Agent Systems Biology Target Funnel")
+st.caption("Powered by Groq API & STRING DB — An automated target prioritization workflow.")
 
-# Initialize session states for caching data across button clicks
+# Initialize session states for caching data across workflow actions
 if "topology_df" not in st.session_state:
     st.session_state["topology_df"] = None
 if "network_obj" not in st.session_state:
     st.session_state["network_obj"] = None
+if "pathway_df" not in st.session_state:
+    st.session_state["pathway_df"] = None
+if "disease_df" not in st.session_state:
+    st.session_state["disease_df"] = None
+
 with st.sidebar:
     st.header("🔑 Configuration")
-    user_api_key = st.text_input("Enter Free Google Gemini API Key:", type="password")
-    st.markdown("[Get a free Gemini API key here](https://google.com)")
+    groq_api_key = st.text_input("Enter Groq API Key:", type="password")
+    groq_model = st.selectbox("Select Groq Model:", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"])
+    st.markdown("[Get your Groq API key here](https://groq.com)")
     
     st.header("📊 Network Parameters")
-    confidence_score = st.slider("STRING Confidence Cutoff", 400, 900, 400, step=100)
-    # add_nodes = st.number_input("Neighborhood Expansion Nodes", min_value=0, max_value=20, value=5)
+    confidence_score = st.slider("STRING Confidence Cutoff", 150, 900, 400, step=50)
     
     st.header("🎛️ Topology Filter Switch")
-    topological_cutoff = st.slider("Consensus Score Threshold (Cutoff)", 0.1, 0.9, 0.35, step=0.05)
-    st.caption("Genes scoring below this mathematical average will be pruned.")
-    
+    topological_cutoff = st.slider("Consensus Score Threshold (Cutoff)", 0.0, 1.0, 0.35, step=0.05)
+    st.caption("Genes scoring below this combined centralities average will be filtered out as non-influential.")
+
 def run_network_topology_pipeline(gene_list_str: str) -> dict:
-    """Hits STRING API, builds network graph via NetworkX, and computes mathematical centralities."""
-    genes = [g.strip().upper() for g in gene_list_str.split("\n") if g.strip()]
+    """Hits official STRING API, builds network graph via NetworkX, and computes centralities."""
+    genes = [g.strip().upper() for g in gene_list_str.replace(",", "\n").split("\n") if g.strip()]
     if not genes: 
         return {"status": "error", "message": "No valid gene symbols provided."}
     
@@ -42,36 +47,38 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
         "identifiers": "\n".join(genes), 
         "species": 9606, 
         "required_score": confidence_score, 
-        "add_nodes": 0,
-        "caller_identity": "targetscout_gemini"
+        "caller_identity": "multi_agent_bio_workflow"
     }
     
     G = nx.Graph()
+    # Ensure all input genes exist in the graph initialization layer
+    for gene in genes:
+        G.add_node(gene)
+        
     used_fallback = False
-    
     try:
-        response = requests.post(url, data=payload, timeout=6)
+        response = requests.post(url, data=payload, timeout=10)
         if response.status_code == 200 and "html" not in response.text.lower():
             interactions = response.json()
             for edge in interactions:
-                p1 = edge.get("preferredName_A")
-                p2 = edge.get("preferredName_B")
+                p1 = edge.get("preferredName_A", "").upper()
+                p2 = edge.get("preferredName_B", "").upper()
                 score = edge.get("score")
                 if p1 and p2:
                     G.add_edge(p1, p2, weight=score)
-        else: used_fallback = True
-    except Exception: used_fallback = True
-        
-    # Local fallback interactome if remote API is blocked/down
-    if used_fallback or G.number_of_nodes() == 0:
+        else:
+            used_fallback = True
+    except Exception:
         used_fallback = True
+        
+    if used_fallback:
+        # Fallback interconnectivity generation for simulation safety
         for i, g1 in enumerate(genes):
-            G.add_node(g1)
             for g2 in genes[i+1:]:
-                if hash(g1 + g2) % 3 == 0 or g1 in ["SERPINE1", "STAT3", "EGFR"]:
-                    G.add_edge(g1, g2, weight=0.75)
+                if hash(g1 + g2) % 3 == 0:
+                    G.add_edge(g1, g2, weight=0.4)
                     
-    # Compute centralities
+    # Compute Network Topological Parameters
     deg_cent = nx.degree_centrality(G)
     bet_cent = nx.betweenness_centrality(G) if len(G.nodes()) > 2 else {n: 0.0 for n in G.nodes()}
     clo_cent = nx.closeness_centrality(G)
@@ -79,370 +86,267 @@ def run_network_topology_pipeline(gene_list_str: str) -> dict:
     metrics = [{
         "Gene": node,
         "Degree Centrality": round(deg_cent[node], 4),
-        "Betweenness (Bottleneck)": round(bet_cent[node], 4),
-        "Closeness (Proximity)": round(clo_cent[node], 4),
+        "Betweenness Centrality": round(bet_cent[node], 4),
+        "Closeness Centrality": round(clo_cent[node], 4),
     } for node in G.nodes()]
     
     df = pd.DataFrame(metrics)
-    df["Consensus Rank Score"] = (df["Degree Centrality"] + df["Betweenness (Bottleneck)"] + df["Closeness (Proximity)"]) / 3
+    # Custom formula aggregating topological characteristics into a combined Consensus parameter
+    df["Consensus Rank Score"] = (df["Degree Centrality"] + df["Betweenness Centrality"] + df["Closeness Centrality"]) / 3
     df = df.sort_values(by="Consensus Rank Score", ascending=False).reset_index(drop=True)
     
     st.session_state["topology_df"] = df
     st.session_state["network_obj"] = G
     
-    status_msg = "Calculated via Local Failsafe Engine." if used_fallback else "Parsed via Remote STRING API."
-    return {"status": "success", "df": df, "raw_text": f"Mapped {len(G.nodes())} markers. {status_msg}"}
+    status_msg = "Calculated via Offline Failsafe Engine." if used_fallback else "Parsed via Live STRING API."
+    return {"status": "success", "df": df, "message": status_msg}
 
-def run_functional_enrichment_pipeline(gene_list_str: str) -> dict:
-    """
-    Submits ALL input genes programmatically to the DAVID Bioinformatics API.
-    Parses Functional Annotations, Pathways, and Diseases into DataFrames.
-    """
-    # Clean and parse the full raw text input box list
+def run_functional_enrichment_pipeline(gene_list_str: str, influential_genes: list) -> dict:
+    """Submits ALL genes to Enrichr API to extract significant KEGG Pathways and OMIM Diseases."""
     cleaned_genes = [g.strip().upper() for g in gene_list_str.replace(",", "\n").split("\n") if g.strip()]
     
-    # 1. Base API URL Structure for DAVID Light-Duty Programmatic Access
-    david_url = "https://nih.gov"
+    # Enrichr list upload endpoint
+    upload_url = "https://maayanlab.cloud"
+    payload = {'list': (None, '\n'.join(cleaned_genes)), 'description': (None, 'Target Genes')}
     
-    # Pre-packaged local backup payload if DAVID servers are busy/down
-    fallback_payload = {
-        "text_context": "Top DAVID Enriched Pathways:\n- [KEGG_PATHWAY] Regulation of extracellular matrix organization\n\nTop DAVID Disease Links:\n- [DISEASE] Chronic Fibrotic Context",
-        "top_pathway": "Regulation of extracellular matrix organization",
-        "top_disease": "Fibrotic Disease Context"
-    }
+    path_df = pd.DataFrame(columns=["Description", "P-Value", "Influential Genes Mapped"])
+    dis_df = pd.DataFrame(columns=["Description", "P-Value", "Influential Genes Mapped"])
     
-    if not cleaned_genes:
-        return fallback_payload
-
-    # Parameters to initialize a dynamic light-duty analysis session on DAVID
-    payload = {
-        "type": "OFFICIAL_GENE_SYMBOL",
-        "ids": ",".join(cleaned_genes),
-        "tool": "chartReport",
-        "annot": "GOTERM_BP_DIRECT,KEGG_PATHWAY,OMIM_DISEASE"
-    }
-
     try:
-        # Request data stream directly from DAVID backend routing layers
-        res = requests.post(david_url, data=payload, timeout=8)
-        
-        # DAVID returns tab-separated text tables (.tsv chart files) via programmatic URLs
-        if res.status_code == 200 and "html" not in res.text.lower() and len(res.text.strip()) > 0:
-            lines = res.text.strip().split("\n")
+        response = requests.post(upload_url, files=payload, timeout=10)
+        if response.status_code == 200:
+            user_list_id = response.json().get('userListId')
+            enrich_url = "https://maayanlab.cloud"
             
-            functional_data = []
-            pathway_data = []
-            disease_data = []
-            
-            # Read and parse the raw tab-delimited text matrix lines
-            header = lines[0].split("\t")
-            for line in lines[1:50]:  # Evaluate top 50 rows for safety
-                row = line.split("\t")
-                if len(row) < 5: 
-                    continue
+            # 1. Fetch KEGG Pathways
+            kegg_params = {'userListId': user_list_id, 'backgroundType': 'KEGG_2021_Human'}
+            kegg_res = requests.get(enrich_url, params=kegg_params, timeout=10).json()
+            if 'KEGG_2021_Human' in kegg_res:
+                path_rows = []
+                for term in kegg_res['KEGG_2021_Human'][:15]:
+                    term_name = term[1]
+                    p_val = term[2]
+                    overlap_genes = [g.upper() for g in term[5]]
+                    inf_mapped = [g for g in overlap_genes if g in influential_genes]
+                    path_rows.append({
+                        "Description": term_name, "P-Value": p_val, 
+                        "Influential Genes Mapped": ", ".join(inf_mapped) if inf_mapped else "None"
+                    })
+                path_df = pd.DataFrame(path_rows).sort_values(by="P-Value").reset_index(drop=True)
                 
-                category = row[0].strip()   # e.g., GOTERM_BP_DIRECT
-                term_name = row[1].strip()  # e.g., cell migration
-                p_value = float(row[4])     # EASE Score / P-Value metric
-                genes_involved = row[5].strip() if len(row) > 5 else ""
-                
-                data_row = {
-                    "Description": term_name,
-                    "Source": category,
-                    "P-Value": p_value,
-                    "Matching Genes": genes_involved
-                }
-                
-                # Sort row item directly into its matching section table array
-                if "GOTERM" in category:
-                    functional_data.append(data_row)
-                elif "KEGG" in category:
-                    pathway_data.append(data_row)
-                elif "OMIM" in category or "DISEASE" in category:
-                    disease_data.append(data_row)
-            
-            # Transform parsed charts cleanly into sorted Pandas DataFrames
-            func_df = pd.DataFrame(functional_data).sort_values(by="P-Value").reset_index(drop=True)
-            path_df = pd.DataFrame(pathway_data).sort_values(by="P-Value").reset_index(drop=True)
-            dis_df = pd.DataFrame(disease_data).sort_values(by="P-Value").reset_index(drop=True)
-            
-            # Cache tables globally within Streamlit's runtime memory states
-            st.session_state["functional_df"] = func_df
-            st.session_state["pathway_df"] = path_df
-            st.session_state["disease_df"] = dis_df
-            
-            # Format summarized text lines for the LLM core orchestrator prompt
-            path_summary = [f"- {r['Description']} (P: {r['P-Value']:.4e})" for _, r in path_df.head(4).iterrows()]
-            dis_summary = [f"- {r['Description']} (P: {r['P-Value']:.4e})" for _, r in dis_df.head(4).iterrows()]
-            
-            top_pathway_name = path_df.iloc[0]["Description"] if not path_df.empty else "therapeutic target"
-            top_disease_name = dis_df.iloc[0]["Description"] if not dis_df.empty else "human disease process"
-            
-            compiled_context = (
-                "Top DAVID Enriched Pathways:\n" + "\n".join(path_summary) +
-                "\n\nTop DAVID Disease Affiliations:\n" + "\n".join(dis_summary)
-            )
-            
-            return {
-                "text_context": compiled_context,
-                "top_pathway": top_pathway_name,
-                "top_disease": top_disease_name
-            }
-            
-        return fallback_payload
+            # 2. Fetch OMIM Diseases
+            omim_params = {'userListId': user_list_id, 'backgroundType': 'OMIM_Disease'}
+            omim_res = requests.get(enrich_url, params=omim_params, timeout=10).json()
+            if 'OMIM_Disease' in omim_res:
+                dis_rows = []
+                for term in omim_res['OMIM_Disease'][:15]:
+                    term_name = term[1]
+                    p_val = term[2]
+                    overlap_genes = [g.upper() for g in term[5]]
+                    inf_mapped = [g for g in overlap_genes if g in influential_genes]
+                    dis_rows.append({
+                        "Description": term_name, "P-Value": p_val, 
+                        "Influential Genes Mapped": ", ".join(inf_mapped) if inf_mapped else "None"
+                    })
+                dis_df = pd.DataFrame(dis_rows).sort_values(by="P-Value").reset_index(drop=True)
     except Exception:
-        return fallback_payload
+        # Failsafe empty arrays if third-party enrichment server times out
+        pass
 
-def run_pubmed_literature_pipeline(target_gene: str, disease: str) -> str:
-    """
-    Queries official NCBI PubMed search and summary endpoints.
-    Includes proper URL encoding parameters and email contact tokens to prevent cloud blocks.
-    """
+    st.session_state["pathway_df"] = path_df
+    st.session_state["disease_df"] = dis_df
+    
+    top_pathway = path_df.iloc[0]["Description"] if not path_df.empty else "Cellular Signaling Network"
+    top_disease = dis_df.iloc[0]["Description"] if not dis_df.empty else "Pathological Condition"
+    
+    return {"top_pathway": top_pathway, "top_disease": top_disease}
+
+def run_pubmed_literature_pipeline(target_gene: str, pathways: str, diseases: str) -> str:
+    """Queries NCBI E-Search endpoint to track publications bridging the gene with terms."""
     gene = target_gene.upper().strip()
+    search_term = f"{gene}[Title/Abstract] AND (\"{pathways}\"[Title/Abstract] OR \"{diseases}\"[Title/Abstract])"
     
-    # Clean the pathway/disease term: remove punctuation and strip out extra spaces
-    clean_disease = "".join([c if c.isalnum() or c.isspace() else " " for c in disease])
-    clean_disease = " ".join(clean_disease.split())
-    
-    # Strict API target query formulation
     url = "https://nih.gov"
-    
-    # Include tool and email keys to authenticate the Streamlit Cloud container request to NCBI
     params = {
-        "db": "pubmed",
-        "term": f"{gene}[Title/Abstract] AND {clean_disease}[Title/Abstract] AND target",
-        "retmode": "json",
-        "retmax": "2",
-        "tool": "TargetScoutAI_Pipeline",
-        "email": "biotech_dev@example.com"  # Standard placeholder email requested by NCBI
+        "db": "pubmed", "term": search_term, "retmode": "json",
+        "retmax": "2", "tool": "MultiAgentBioWorkflow", "email": "dev@example.com"
     }
     
     try:
-        response = requests.get(url, params=params, timeout=5)
-        search_res = response.json()
-        id_list = search_res.get("esearchresult", {}).get("idlist", [])
+        res = requests.get(url, params=params, timeout=8).json()
+        id_list = res.get("esearchresult", {}).get("idlist", [])
         
-        # Broad failover backup query strategy if specific pathway returns 0 hits
         if not id_list:
-            params["term"] = f"{gene}[Title/Abstract] AND therapeutic target"
-            response = requests.get(url, params=params, timeout=5)
-            search_res = response.json()
-            id_list = search_res.get("esearchresult", {}).get("idlist", [])
+            # Fallback relaxation constraint search
+            params["term"] = f"{gene}[Title/Abstract] AND functional pathway disease"
+            res = requests.get(url, params=params, timeout=5).json()
+            id_list = res.get("esearchresult", {}).get("idlist", [])
             
-        if not id_list: 
-            return f"- **{gene}**: No explicit validation publications located on PubMed database."
-        
-        # Step 2: Query the summary API for the paper details with contact metadata fields
+        if not id_list:
+            return f"- **{gene}**: Bypassed. No co-mention literature matches verified in NCBI repositories."
+            
         summary_url = "https://nih.gov"
-        summary_params = {
-            "db": "pubmed",
-            "id": ",".join(id_list),
-            "retmode": "json",
-            "tool": "TargetScoutAI_Pipeline",
-            "email": "biotech_dev@example.com"
-        }
+        sum_params = {"db": "pubmed", "id": ",".join(id_list), "retmode": "json"}
+        sum_res = requests.get(summary_url, params=sum_params, timeout=8).json()
+        results = sum_res.get("result", {})
         
-        summary_response = requests.get(summary_url, params=summary_params, timeout=5)
-        summary_res = summary_response.json()
-        summary_results = summary_res.get("result", {})
-        
-        # Step 3: Loop, index, and compile clean line outputs
-        compiled_references = []
-        for index, pmid in enumerate(id_list, start=1):
-            paper_info = summary_results.get(pmid, {})
-            title = paper_info.get("title", f"{gene} Therapeutic Target Validation Study")
-            pub_date_str = str(paper_info.get("pubdate", "2026"))
-            source_journal = paper_info.get("source", "PubMed Central Index")
+        citations = []
+        for idx, pmid in enumerate(id_list, start=1):
+            details = results.get(pmid, {})
+            title = details.get("title", f"{gene} Mechanistic Interaction Analysis")
+            journal = details.get("source", "NCBI Index")
+            pubdate = details.get("pubdate", "2026")
+            citations.append(f"  [{idx}] *{title}* — **{journal}**, {pubdate}. [PubMed Record](https://nih.gov{pmid}/)")
             
-            # Formats an ironclad, hyperlinked scientific citation line item
-            citation_text = f"[{index}] *{title}* - **{source_journal}** ({pub_date_str}). [PubMed Link](https://pubmed.ncbi.nlm.nih.gov/{pmid}/)"
-            compiled_references.append(citation_text)
-            
-        return f"- **{gene}** Target Verification payload:\n  " + "\n  ".join(compiled_references)
-        
+        return f"- **{gene}** Literature Links:\n" + "\n".join(citations)
     except Exception:
-        # Ironclad internal container backup: Returns direct clickable markdown links if JSON decoding variables drop out
-        if 'id_list' in locals() and id_list:
-            fallback_links = [f"[{i}] {gene} Structural Validation Record. [PubMed Link](https://nih.gov{pmid}/)" for i, pmid in enumerate(id_list, start=1)]
-            return f"- **{gene}** Target Verification payload:\n  " + "\n  ".join(fallback_links)
-        return f"- **{gene}**: Real-time PubMed text crawler bypassed. Proceeding with network topology context."
-       
-default_genes = "SERPINE1, MMP1, MMP7, TGFB1, EGFR, STAT3, VEGFA"
-input_genes = st.text_area("Provide Gene Symbols (one per line):", value="\n".join(default_genes.split(", ")), height=150)
-        
+        return f"- **{gene}**: Real-time reference fetch timed out. Proceeding with static target data summary."
+
+# Target Input Form Layout Setup
+default_genes = "SERPINE1\nMMP1\nMMP7\nTGFB1\nEGFR\nSTAT3\nVEGFA\nIL6\nAKT1"
+input_genes = st.text_area("Provide Gene Symbols (One Gene per Line):", value=default_genes, height=180)
+
 if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
-    if not user_api_key:
-        st.error("Please add your free Google Gemini API key in the sidebar configuration layout.")
+    if not groq_api_key:
+        st.error("Please add your Groq API Key inside the sidebar configuration module to authenticate agents.")
     else:
-        os.environ["GOOGLE_API_KEY"] = user_api_key
+        os.environ["GROQ_API_KEY"] = groq_api_key
         
-        with st.status("🕵️‍♂️ Executing multi-stage systems biology workflow via Gemini...", expanded=True) as status:
-            
-            # Step 1: Run Network Math
-            st.write("1. Initializing Network Analyst Layer → Processing network matrix & running centralities...")
+        with st.status("🕵️‍♂️ Orchestrating Multi-Agent Discovery Pipeline across Omics Layers...", expanded=True) as status:
+            # Step 1: Execute Network Math Construction Layer
+            st.write("1. 🕸️ Activating Network Analyst Agent → Mapping STRING nodes & centralities...")
             net_results = run_network_topology_pipeline(input_genes)
-            
             if net_results["status"] == "error":
                 st.error(net_results["message"])
                 st.stop()
                 
-            raw_df = net_results["df"]
-            G_obj = st.session_state["network_obj"]
-            # Step 2: Apply mathematical pruning filters based on sidebar threshold
-            st.write(f"2. Filtering down to influential genes using cutoff threshold (> {topological_cutoff})...")
-            filtered_df = raw_df[raw_df["Consensus Rank Score"] >= topological_cutoff].reset_index(drop=True)
+            topology_table = net_results["df"]
+            network_graph = st.session_state["network_obj"]
             
-            # Extract clean Python list array elements
-            influential_genes = filtered_df["Gene"].tolist()
+            # Step 2: Apply Combined Consensus Metric Threshold Filtering Action
+            st.write(f"2. 🎛️ Evaluating target list against combined Consensus Threshold (> {topological_cutoff})...")
+            surviving_df = topology_table[topology_table["Consensus Rank Score"] >= topological_cutoff].reset_index(drop=True)
+            influential_targets = surviving_df["Gene"].tolist()
             
-            if not influential_genes:
-                st.error("❌ Pruning failure: Zero genes matched your centrality threshold. Reduce the slider in the sidebar.")
+            if not influential_targets:
+                st.error("❌ Cutoff too high. No genes survived the threshold evaluation parameter. Relax the slider cutoff.")
                 st.stop()
                 
-            st.write(f"👉 Surviving Influential Targets ({len(influential_genes)}): {', '.join(influential_genes)}")
+            st.write(f"👉 Identified Influential Genes ({len(influential_targets)}): {', '.join(influential_targets)}")
             
-
-            # Stage 2: Functional Annotation & Disease Enrichment Tracking
-            st.write("2. Routing full input gene list to database for pathway & disease annotations...")
+            # Step 3: Run Enrichment Engine on All Input Genes
+            st.write("3. 🧬 Activating Enrichment Analyst Agent → Uploading to Enrichr for KEGG & OMIM charts...")
+            enrich_ctx = run_functional_enrichment_pipeline(input_genes, influential_targets)
+            top_pathway_found = enrich_ctx["top_pathway"]
+            top_disease_found = enrich_ctx["top_disease"]
             
-            # 🎯 CHANGED: Swapped 'influential_genes' for 'input_genes' to process everything
-            enrichment_res = run_functional_enrichment_pipeline(input_genes)
-
-            if isinstance(enrichment_res, dict):
-                enrichment_context = enrichment_res["text_context"]
-                discovered_focus_area = enrichment_res["top_pathway"]
-            else:
-                enrichment_context = enrichment_res
-                discovered_focus_area = "therapeutic target"
-
-            st.write(f"🎯 **Discovered Pathway Focus Area:** {discovered_focus_area}")
-
-
-            # Stage 3: Live PubMed Literature Tracking Loop
-            st.write(f"3. Launching literature miner loop targeting: {discovered_focus_area}...")
-            pubmed_accumulator = []
-            for target in influential_genes[:4]:
-                st.write(f"   • Mining live validation proof for: {target}")
-                # Bypasses hardcoded inputs; dynamically joins the gene with the enriched pathway
-                pubmed_accumulator.append(run_pubmed_literature_pipeline(target, discovered_focus_area))
-                time.sleep(1.5) 
-            combined_pubmed_context = "\n".join(pubmed_accumulator)
-
+            # Step 4: Run Targeted Literature Loop for Influential Nodes
+            st.write("4. 📚 Activating Literature Miner Agent → Querying NCBI PubMed abstracts...")
+            literature_payload_items = []
+            for target in influential_targets[:4]:  # Restrict loop length to prevent request throttling
+                st.write(f"   • Mining biological context links for: {target}")
+                lit_record = run_pubmed_literature_pipeline(target, top_pathway_found, top_disease_found)
+                literature_payload_items.append(lit_record)
+                time.sleep(0.5)
+            combined_lit_context = "\n\n".join(literature_payload_items)
             
-            # Step 5: Initialize the Agent & Build Augmented RAG Prompt Packet
-            st.write("5. Directing all clean knowledge streams to Gemini Core Synthesis Lead...")
-            gemini_target_agent = Agent(
-                name="Amgen Gemini Target Discovery Lead",
-                model=Gemini(id="gemini-3.5-flash"), 
+            # Step 5: Multi-Agent Synthesis and Orchestration Report Phase
+            st.write("5. 🧠 Activating Lead Orchestrator Agent → Synthesizing executive dossier panels...")
+            
+            orchestrator_agent = Agent(
+                name="Biomedical Discovery Lead",
+                model=Groq(id=groq_model),
                 instructions=[
-                    "You are an expert Lead Computational Systems Biologist and Lead Scientific AI Orchestrator specializing in Target Discovery and Translational Medicine.",
-                    "Review the systems biology data payload below, analyze the mathematical network centrality values, and build an executive candidate report.",
-                    "Structure your output cleanly with titles for: 1. Graph Structural Insights, 2. Pathway Mapping, and 3. Clinical Tractability Recommendations.",
-                    "CRITICAL FOR INLINE CITATIONS: When writing about target findings, you must place the matching bracketed index number (e.g., [1], [2]) directly after your statement to show which reference verified it.",
-                    "CRITICAL FOR THE REFERENCE LIST: You must include a '📚 Verifiable Scientific References' section at the absolute bottom. Print the exact numbered text lines passed to you in the PubMed payload.",
+                    "You are a Senior Lead Translational Biologist coordinating structural bioinformatics data.",
+                    "Analyze the provided parameters, mapping data, and literature citations into an executive target blueprint.",
+                    "Break down the output sections cleanly into: 1. Graph Structural Insights, 2. Overlap Alignment Analysis, and 3. Literature Evidence synthesis.",
+                    "Ensure you mention how the influential genes cross-map into the pathways and diseases provided.",
+                    "Maintain precise language fit for a biomedical research report dashboard layout."
                 ],
-                markdown=True,
+                markdown=True
             )
             
-            augmented_prompt = f"""
-            Synthesize this compiled systems biology evidence into an Executive Target Dossier:
-            [SURVIVING TARGETS OVERVIEW]: {', '.join(influential_genes)}
-            [FUNCTIONAL ONTOLOGY ANNOTATIONS]: {enrichment_context}
-            [PUBMED TARGET VALIDATION VERIFICATION]:
-            {combined_pubmed_context}
+            agent_prompt = f"""
+            Synthesize these systems biology results into an Executive Target Dossier:
+            [INPUT TARGET LIST]: {input_genes.replace('\n', ', ')}
+            [INFLUENTIAL TARGET NODES]: {', '.join(influential_targets)}
+            [TOP ENRICHED PATHWAY]: {top_pathway_found}
+            [TOP ENRICHED OMIM DISEASE]: {top_disease_found}
+            
+            [LITERATURE EVIDENCE PAYLOAD]:
+            {combined_lit_context}
             """
             
-            # Create a fallback placeholder string variable
-            agent_content_output = ""
-            
             try:
-                # Attempt to execute the core text summary generation request
-                agent_response = gemini_target_agent.run(augmented_prompt)
-                status.update(label="✅ Discovery Pipeline Synthesis Complete!", state="complete")
-                agent_content_output = agent_response.content
-                
-            except Exception as api_error:
-                # 🎯 THE FIX: Intercepts the quota error and gracefully keeps the dashboard functional
-                status.update(label="⚠️ AI Synthesis Rate-Limit Encountered", state="error")
-                
-                if "ResourceExhausted" in str(api_error) or "429" in str(api_error):
-                    agent_content_output = """
-                    ### ⚠️ Short-Term API Rate Limit Triggered (429)
-                    Your 30-gene request triggered a high-frequency traffic limit from your current project location.
-                    
-                    **💡 What to do next:**
-                    1. Wait exactly **60 seconds** for Google's internal minute-window block to cool down.
-                    2. Reduce the list size slightly or re-run the pipeline execution step.
-                    
-                    **📊 Your Analytics Are Safe:**
-                    Your raw centralities and clinical disease associations are fully generated! Look at the **Network Topology Analytics** and **Multi-Omics Enrichment Studio** tabs to view your tables.
-                    """
-                else:
-                    agent_content_output = f"An unexpected connection error occurred: {str(api_error)}"
+                agent_response = orchestrator_agent.run(agent_prompt)
+                master_dossier_text = agent_response.content
+                status.update(label="✅ Systems Biology Architecture Pipeline Executed Successfully!", state="complete")
+            except Exception as e:
+                status.update(label="⚠️ Summary Generation Layer Interrupted", state="error")
+                master_dossier_text = f"An API processing interruption occurred: {str(e)}\n\nReview your structural charts in the accompanying tabs below."
 
-        # Structured Tab Layout initialization 
+        # Structured Visual Layout Workspaces Initialization
         st.markdown("---")
-        # Define 3 isolated dashboard workspaces
-        tab1, tab2, tab3 = st.tabs(["📋 Executive Target Dossier", "📊 Network Topology Analytics", "🧬 Multi-Omics Enrichment Studio"])
+        tab1, tab2, tab3 = st.tabs([
+            "📋 Executive Target Dossier & Literature", 
+            "📊 Network Topology Studio", 
+            "🧬 Multi-Omics Enrichment Studio"
+        ])
         
         with tab1:
-            st.subheader("📋 Consolidated Master Target Dossier")
-            st.markdown(agent_content_output)
+            st.subheader("📋 Consolidated Master Target Dossier & Literature Summary")
+            st.markdown(master_dossier_text)
             
         with tab2:
-            st.subheader("📊 Network Topology Architecture and Filter Metrics")
-            col1, col2 = st.columns(2)
+            st.subheader("📊 Interactivity Architecture & Topology Analysis Matrix")
+            col1, col2 = st.columns([4, 5])
             
             with col1:
-                st.markdown("**🕸️ Programmatic Network View (NetworkX Canvas)**")
-                if G_obj is not None:
-                    fig, ax = plt.subplots(figsize=(7, 5))
-                    pos = nx.spring_layout(G_obj, k=0.4, seed=42)
+                st.markdown("**🕸️ Programmatic Network View (STRING Graph Rendering)**")
+                if network_graph is not None and len(network_graph.nodes()) > 0:
+                    fig, ax = plt.subplots(figsize=(6, 5), facecolor='none')
+                    pos = nx.spring_layout(network_graph, k=0.4, seed=42)
                     
-                    node_colors = ['#00E5FF' if node in influential_genes else '#E0E0E0' for node in G_obj.nodes()]
-                    node_sizes = [700 if node in influential_genes else 400 for node in G_obj.nodes()]
+                    node_colors = ['#00E5FF' if n in influential_targets else '#E0E0E0' for n in network_graph.nodes()]
+                    node_sizes = [800 if n in influential_targets else 350 for n in network_graph.nodes()]
                     
-                    nx.draw_networkx_nodes(G_obj, pos, ax=ax, node_color=node_colors, node_size=node_sizes, edgecolors='#102030')
-                    nx.draw_networkx_edges(G_obj, pos, ax=ax, edge_color='#B0BEC5', width=1.2)
-                    nx.draw_networkx_labels(G_obj, pos, ax=ax, font_size=9, font_family='sans-serif', font_weight='bold')
+                    nx.draw_networkx_nodes(network_graph, pos, ax=ax, node_color=node_colors, node_size=node_sizes, edgecolors='#112233', linewidths=1.5)
+                    nx.draw_networkx_edges(network_graph, pos, ax=ax, edge_color='#CFD8DC', width=1.5)
+                    nx.draw_networkx_labels(network_graph, pos, ax=ax, font_size=9, font_weight='bold', font_family='sans-serif')
                     
-                    plt.axis('off')
+                    ax.axis('off')
                     st.pyplot(fig)
-                    st.caption("🔵 Cyan Nodes = Passed filter criteria threshold. ⚪ Grey Nodes = Pruned by threshold cutoff.")
-            
+                    st.caption("🔵 Cyan Nodes = Passed filter criteria threshold (Influential). ⚪ Grey Nodes = Filtered out by cutoff constraint.")
+                else:
+                    st.info("No connections mapped to build visual layout components.")
+                    
             with col2:
-                st.markdown("**📈 Math Filter Metrics Table**")
+                st.markdown("**📈 Comprehensive Network Centralities Matrix**")
                 if st.session_state["topology_df"] is not None:
                     def highlight_survivors(row):
-                        color = 'background-color: rgba(0, 229, 255, 0.15)' if row['Consensus Rank Score'] >= topological_cutoff else ''
+                        color = 'background-color: rgba(0, 229, 255, 0.12)' if row['Consensus Rank Score'] >= topological_cutoff else ''
                         return [color] * len(row)
                     
                     styled_df = st.session_state["topology_df"].style.apply(highlight_survivors, axis=1)
                     st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                    st.caption("Rows highlighted in Cyan represent selected influential targets satisfying the mathematical cutoff parameters.")
+
         with tab3:
-            st.subheader("🧬 Comprehensive Biological Target Enrichment (DAVID Engine)")
-            st.caption("Live functional ontologies, pathway maps, and disease charts derived from the official DAVID Database.")
+            st.subheader("🧬 Downstream Enrichment & Influential Target Mapping Studio")
+            st.caption("Programmatic analysis charts displaying global functional trends and targeted gene assignment links.")
             
-            # Row Layout: Three Structured Enrichment Tables Stacking Side-by-Side
-            enc_col1, enc_col2, enc_col3 = st.columns(3)
+            enc_col1, enc_col2 = st.columns(2)
             
             with enc_col1:
-                st.markdown("**🔍 1. Functional Annotations (DAVID GO:BP)**")
-                if st.session_state.get("functional_df") is not None and not st.session_state["functional_df"].empty:
-                    st.dataframe(st.session_state["functional_df"], use_container_width=True, hide_index=True)
-                else:
-                    st.info("No active functional ontologies logged above significance thresholds.")
-            
-            with enc_col2:
-                st.markdown("**🌿 2. Pathway Alignments (DAVID KEGG)**")
-                if st.session_state.get("pathway_df") is not None and not st.session_state["pathway_df"].empty:
+                st.markdown("**🌿 Significant KEGG Pathway Alignments**")
+                if st.session_state["pathway_df"] is not None and not st.session_state["pathway_df"].empty:
                     st.dataframe(st.session_state["pathway_df"], use_container_width=True, hide_index=True)
                 else:
-                    st.info("No active pathway data matched the input gene targets.")
+                    st.info("No pathways extracted above confidence thresholds.")
                     
-            with enc_col3:
-                st.markdown("**🏥 3. Disease Ontologies (DAVID OMIM)**")
-                if st.session_state.get("disease_df") is not None and not st.session_state["disease_df"].empty:
+            with enc_col2:
+                st.markdown("**🏥 Significant OMIM Disease Ontologies**")
+                if st.session_state["disease_df"] is not None and not st.session_state["disease_df"].empty:
                     st.dataframe(st.session_state["disease_df"], use_container_width=True, hide_index=True)
                 else:
-                    st.info("No explicit disease mapping annotations mapped above threshold limits.")
+                    st.info("No disease profile matches returned from enrichment query records.")
