@@ -335,20 +335,21 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
 
         with tab3:
             st.subheader("🧬 Downstream Enrichment & Influential Target Mapping Studio")
-            st.caption("Programmatic analysis charts displaying global functional trends and targeted gene assignment links.")
+            st.caption("Programmatic analysis charts displaying global functional trends derived directly from the DAVID Database.")
             
-            enc_col1, enc_col2 = st.columns(2)
+            # Row Layout: Adjusted from 3 columns down to 2 columns
+            enc_col1, enc_col2 = st.columns(2) 
             
             with enc_col1:
-                st.markdown("**🌿 Significant KEGG Pathway Alignments**")
-                if st.session_state["pathway_df"] is not None and not st.session_state["pathway_df"].empty:
+                st.markdown("**🌿 1. Pathway Alignments (DAVID KEGG)**")
+                if st.session_state.get("pathway_df") is not None and not st.session_state["pathway_df"].empty:
                     st.dataframe(st.session_state["pathway_df"], use_container_width=True, hide_index=True)
                 else:
-                    st.info("No pathways extracted above confidence thresholds.")
+                    st.info("No active pathway data matched the input gene targets.")
                     
             with enc_col2:
-                st.markdown("**🏥 Significant OMIM Disease Ontologies**")
-                if st.session_state["disease_df"] is not None and not st.session_state["disease_df"].empty:
+                st.markdown("**🏥 2. Disease Ontologies (DAVID OMIM)**")
+                if st.session_state.get("disease_df") is not None and not st.session_state["disease_df"].empty:
                     st.dataframe(st.session_state["disease_df"], use_container_width=True, hide_index=True)
                 else:
-                    st.info("No disease profile matches returned from enrichment query records.")
+                    st.info("No explicit disease mapping annotations mapped above threshold limits.")
