@@ -52,6 +52,17 @@ def parse_gene_list(gene_list_str: str) -> list:
     return sorted(set(g.strip().upper() for g in gene_list_str.replace(",", "\n").split("\n") if g.strip()))
 
 
+def sanitize_llm_markdown(text: str) -> str:
+    """
+    Safety net for stray raw HTML the LLM sometimes emits (most commonly <br> line breaks
+    inside markdown tables). Streamlit's st.markdown() does not render raw HTML by default,
+    so an un-rendered '<br>' would otherwise show up as literal text in the UI.
+    """
+    text = re.sub(r"<br\s*/?>", "  \n", text, flags=re.IGNORECASE)  # markdown-style line break
+    text = re.sub(r"</?(div|span|p)\s*/?>", "", text, flags=re.IGNORECASE)
+    return text
+
+
 def compute_topology_metrics(G: nx.Graph) -> pd.DataFrame:
     """Computes degree, betweenness, and closeness centrality for every node."""
     deg_cent = nx.degree_centrality(G)
@@ -278,11 +289,33 @@ def run_enrichment_pipeline(gene_list_str: str, influential_genes: list) -> dict
 # --------------------------------------------------------------------------------------
 # Agent 3: Literature evidence (NCBI PubMed E-utilities)
 # --------------------------------------------------------------------------------------
-def run_pubmed_literature_pipeline(target_gene: str, pathway: str, disease: str) -> str:
-    """Queries NCBI E-utilities for abstracts connecting a gene to the top pathway/disease."""
+def build_gene_term_map(kegg_df: pd.DataFrame, disease_df: pd.DataFrame) -> dict:
+    """
+    Maps each influential gene to every significant enriched pathway/disease term it
+    actually overlaps (per the 'Influential Genes Mapped' column), so literature search
+    can connect a gene to ALL of its enriched terms, not just the single top one.
+    Returns: {gene: [(term_description, "KEGG Pathway" | "OMIM Disease"), ...]}
+    """
+    gene_terms: dict = {}
+    for df, label in [(kegg_df, "KEGG Pathway"), (disease_df, "OMIM Disease")]:
+        if df is None or df.empty:
+            continue
+        for _, row in df.iterrows():
+            mapped = row.get("Influential Genes Mapped", "None")
+            if not mapped or mapped == "None":
+                continue
+            for gene in [g.strip() for g in mapped.split(",") if g.strip()]:
+                gene_terms.setdefault(gene, []).append((row["Description"], label))
+    return gene_terms
+
+
+def run_pubmed_literature_pipeline(target_gene: str, mapped_terms: list, max_terms: int = 4) -> str:
+    """
+    Queries NCBI E-utilities for abstracts connecting a gene to EACH enriched pathway/disease
+    term it maps to (up to max_terms, already ranked by enrichment significance), rather than
+    only the single top pathway/disease.
+    """
     gene = target_gene.upper().strip()
-    context_term = pathway or disease or "therapeutic target"
-    clean_context = re.sub(r"[^A-Za-z0-9 ]", " ", context_term).strip()
 
     def esearch(term: str) -> list:
         params = {
@@ -293,16 +326,9 @@ def run_pubmed_literature_pipeline(target_gene: str, pathway: str, disease: str)
         r.raise_for_status()
         return r.json().get("esearchresult", {}).get("idlist", [])
 
-    try:
-        term = f"{gene}[Title/Abstract] AND ({clean_context}[Title/Abstract] OR therapeutic target)"
-        id_list = esearch(term)
-
+    def fetch_citations(id_list: list) -> list:
         if not id_list:
-            id_list = esearch(f"{gene}[Title/Abstract] AND therapeutic target")
-
-        if not id_list:
-            return f"- **{gene}**: No PubMed abstracts found linking this gene to the enriched pathway/disease context."
-
+            return []
         summary_resp = requests.get(
             EUTILS_ESUMMARY_URL,
             params={"db": "pubmed", "id": ",".join(id_list), "retmode": "json"},
@@ -310,19 +336,50 @@ def run_pubmed_literature_pipeline(target_gene: str, pathway: str, disease: str)
         )
         summary_resp.raise_for_status()
         summary_results = summary_resp.json().get("result", {})
-
         citations = []
         for i, pmid in enumerate(id_list, start=1):
             info = summary_results.get(pmid, {})
             title = info.get("title", "Untitled record")
             pub_date = info.get("pubdate", "n.d.")
             journal = info.get("source", "PubMed")
-            citations.append(f"  [{i}] {title} — **{journal}** ({pub_date}). [PubMed link](https://pubmed.ncbi.nlm.nih.gov/{pmid}/)")
+            citations.append(
+                f"    [{i}] {title} — **{journal}** ({pub_date}). "
+                f"[PubMed link](https://pubmed.ncbi.nlm.nih.gov/{pmid}/)"
+            )
+        return citations
 
-        return f"- **{gene}** literature evidence:\n" + "\n".join(citations)
+    if not mapped_terms:
+        # Gene didn't map to any significant enriched term — fall back to a generic search
+        # so it still gets *some* literature context rather than nothing.
+        try:
+            id_list = esearch(f"{gene}[Title/Abstract] AND therapeutic target")
+            citations = fetch_citations(id_list)
+            if not citations:
+                return f"- **{gene}**: not mapped to any significant enriched pathway/disease term, and no generic PubMed abstracts found."
+            return f"- **{gene}** (no enriched-term mapping — generic literature):\n" + "\n".join(citations)
+        except (requests.RequestException, ValueError) as exc:
+            return f"- **{gene}**: PubMed lookup failed ({exc}). No literature evidence retrieved — please retry."
 
-    except (requests.RequestException, ValueError) as exc:
-        return f"- **{gene}**: PubMed lookup failed ({exc}). No literature evidence retrieved — please retry."
+    sections = [f"- **{gene}** — literature evidence per enriched term it overlaps:"]
+    for term, source in mapped_terms[:max_terms]:
+        clean_term = re.sub(r"[^A-Za-z0-9 ]", " ", term).strip()
+        try:
+            id_list = esearch(f"{gene}[Title/Abstract] AND ({clean_term}[Title/Abstract] OR therapeutic target)")
+            if not id_list:
+                id_list = esearch(f"{gene}[Title/Abstract] AND therapeutic target")
+            citations = fetch_citations(id_list)
+        except (requests.RequestException, ValueError) as exc:
+            sections.append(f"  - *{term}* ({source}): PubMed lookup failed ({exc}).")
+            continue
+
+        if citations:
+            sections.append(f"  - *{term}* ({source}):\n" + "\n".join(citations))
+        else:
+            sections.append(f"  - *{term}* ({source}): no PubMed abstracts found directly linking {gene} to this term.")
+
+        time.sleep(0.34)  # stay under NCBI's ~3 req/sec unauthenticated rate limit
+
+    return "\n".join(sections)
 
 
 # --------------------------------------------------------------------------------------
@@ -366,13 +423,13 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
         top_disease_found = enrich_results["top_disease"] or "no significantly enriched disease"
         st.write(f"   {enrich_results['message']}")
 
-        st.write("4. 📚 Literature Miner Agent → querying NCBI PubMed...")
+        st.write("4. 📚 Literature Miner Agent → querying NCBI PubMed for each gene ↔ enriched term...")
+        gene_term_map = build_gene_term_map(enrich_results["kegg_df"], enrich_results["disease_df"])
         literature_payload_items = []
         for target in influential_targets[:4]:
-            st.write(f"   • Mining literature for: {target}")
-            literature_payload_items.append(
-                run_pubmed_literature_pipeline(target, enrich_results["top_pathway"], enrich_results["top_disease"])
-            )
+            mapped_terms = gene_term_map.get(target, [])
+            st.write(f"   • Mining literature for: {target} ({len(mapped_terms)} enriched term(s) mapped)")
+            literature_payload_items.append(run_pubmed_literature_pipeline(target, mapped_terms))
             time.sleep(0.4)
         combined_lit_context = "\n\n".join(literature_payload_items)
 
@@ -398,6 +455,9 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                 "what the findings show and refer to sources by gene name (e.g. 'as shown in the EGFR literature "
                 "below'), without repeating titles, journals, or URLs yourself.",
                 "Maintain precise language fit for a biomedical research report dashboard.",
+                "Output plain Markdown only — never use raw HTML tags such as <br>, <br/>, <div>, or <table>. "
+                "For a line break, just start a new line or a new bullet point; for multiple items in one line, "
+                "separate them with commas or semicolons instead of HTML tags.",
             ],
             markdown=True,
         )
@@ -425,8 +485,9 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
 
         try:
             agent_response = orchestrator_agent.run(agent_prompt)
+            dossier_body = sanitize_llm_markdown(agent_response.content)
             master_dossier_text = (
-                agent_response.content
+                dossier_body
                 + "\n\n---\n\n### 📚 Literature References\n\n"
                 + combined_lit_context
             )
@@ -437,6 +498,7 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                 f"An LLM API error occurred: {e}\n\nReview the structural charts in the tabs below.\n\n"
                 f"---\n\n### 📚 Literature References\n\n{combined_lit_context}"
             )
+            master_dossier_text = sanitize_llm_markdown(master_dossier_text)
 
     # ----------------------------------------------------------------------------------
     # Results layout
