@@ -124,15 +124,19 @@ def run_functional_enrichment_pipeline(gene_list_str: str, influential_genes: li
             
             for line in lines[1:50]:  # Evaluate top 50 rows for safety
                 row = line.split("\t")
-                if len(row) < 5: 
+                if len(row) < 6: 
                     continue
                 
                 category = row[0].strip()   # e.g., KEGG_PATHWAY
                 term_name = row[1].strip()  # e.g., hsa05200:Pathways in cancer
-                p_val = float(row[4])       # EASE Score / P-Value metric
+                try:
+                    p_val = float(row[4])    # EASE / P-Value is always in column index 4
+                except ValueError:
+                    continue   
+
                 
                 # Extract comma-separated overlapping genes from DAVID column 5
-                overlap_genes = [g.strip().upper() for g in row[5].split(",")] if len(row) > 5 else []
+                overlap_genes = [g.strip().upper() for g in row[5].split(",")]
                 inf_mapped = [g for g in overlap_genes if g in influential_genes]
                 
                 data_row = {
