@@ -209,6 +209,8 @@ def run_enrichment_pipeline(gene_list_str: str, influential_genes: list) -> dict
         return {
             "kegg_df": empty, "disease_df": empty,
             "top_pathway": None, "top_disease": None,
+            "kegg_overlap_summary": "Enrichment step failed — no data available.",
+            "disease_overlap_summary": "Enrichment step failed — no data available.",
             "message": f"Enrichr submission failed ({exc}). No enrichment data available — please retry.",
         }
 
@@ -248,11 +250,27 @@ def run_enrichment_pipeline(gene_list_str: str, influential_genes: list) -> dict
     top_pathway = kegg_df.iloc[0]["Description"] if not kegg_df.empty else None
     top_disease = disease_df.iloc[0]["Description"] if not disease_df.empty else None
 
+    def format_overlap_summary(df: pd.DataFrame, label: str, max_rows: int = 10) -> str:
+        if df.empty:
+            return f"No significant {label} terms were returned."
+        lines = []
+        for _, row in df.head(max_rows).iterrows():
+            lines.append(
+                f"- \"{row['Description']}\" (P={row['P-Value']:.2e}) — "
+                f"influential genes overlapping this term: {row['Influential Genes Mapped']}"
+            )
+        return "\n".join(lines)
+
+    kegg_overlap_summary = format_overlap_summary(kegg_df, "KEGG pathway")
+    disease_overlap_summary = format_overlap_summary(disease_df, "OMIM disease")
+
     return {
         "kegg_df": kegg_df,
         "disease_df": disease_df,
         "top_pathway": top_pathway,
         "top_disease": top_disease,
+        "kegg_overlap_summary": kegg_overlap_summary,
+        "disease_overlap_summary": disease_overlap_summary,
         "message": "Live enrichment results parsed from Enrichr (KEGG_2021_Human, OMIM_Disease).",
     }
 
@@ -371,7 +389,9 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
                 "diseases, or citations that are not present in the input payload.",
                 "If a pathway, disease, or literature item is marked as unavailable, say so plainly instead of "
                 "filling in a plausible-sounding substitute.",
-                "Explain how the influential genes cross-map into the enriched pathways and diseases provided.",
+                "Explain how the influential genes cross-map into the enriched pathways and diseases provided, "
+                "using the KEGG/OMIM overlap sections of the payload as your source of truth for which genes "
+                "overlap which term — do not infer or guess overlap from gene names or pathway topics alone.",
                 "Do NOT re-type, reformat, or paraphrase the individual PubMed citation lines or their links from "
                 "the literature evidence payload — a verbatim, correctly-linked reference list is appended "
                 "separately after your response. In your 'Literature Evidence Synthesis' section, only summarize "
@@ -388,6 +408,16 @@ if st.button("🚀 Launch Autonomous Target Prioritization Pipeline"):
         [INFLUENTIAL TARGET NODES]: {', '.join(influential_targets)}
         [TOP ENRICHED PATHWAY]: {top_pathway_found}
         [TOP ENRICHED OMIM DISEASE]: {top_disease_found}
+
+        [KEGG PATHWAY ↔ INFLUENTIAL GENE OVERLAP]
+        (each significant term below, with which of the influential genes actually fall inside it —
+        use this, and only this, to determine and report overlap; if a gene is not listed against a
+        term here, do not claim it overlaps that term):
+        {enrich_results['kegg_overlap_summary']}
+
+        [OMIM DISEASE ↔ INFLUENTIAL GENE OVERLAP]
+        (same rule as above, for disease terms):
+        {enrich_results['disease_overlap_summary']}
 
         [LITERATURE EVIDENCE PAYLOAD]:
         {combined_lit_context}
